@@ -1,0 +1,16 @@
+node_modules/
+.next/
+out/
+dist/
+.env.local
+.env*.local
+*.log
+.DS_Store
+.turbo/
+next-env.d.ts
+*.tsbuildinfo
+.playwright-mcp/
+*.png
+!**/public/textures/*.png
+# local working notes / scratch (not committed)
+internal/

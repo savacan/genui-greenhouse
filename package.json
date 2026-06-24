@@ -1,0 +1,9 @@
+{
+  "name": "genui-greenhouse",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Generative UI を作りながら学ぶ個人実験リポジトリ（苗床）",
+  "scripts": {
+    "dev": "pnpm --filter space-cockpit dev"
+  }
+}
