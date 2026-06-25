@@ -2,6 +2,14 @@ import { z } from "zod";
 import type { Action, StateHint, ModelSummary, ModelRow } from "../types";
 import { fetchJson } from "../fetchJson";
 
+/**
+ * 「線の幅」つまみ（§8(a)/§11）: quakes が addressable list（topEvents）で返す上位イベント数
+ * ＝モデルの多エンティティ調査の射程の上限。cap を超える「トップN」は静かに truncate される。
+ * 5 = 既定（多くの「トップN比較」を賄い、firewall 無傷・トークン非肥大）。上げると射程は伸びるが、
+ * 効くのはトークンでなく **wall-clock 遅延と盤面サイズ**（§11 実測: cap=10/トップ10 で 2.9分・208要素）。
+ */
+const ADDRESSABLE_TOP_N = 5;
+
 // ---------- shared raw shapes ----------
 interface UsgsProps {
   mag: number | null;
@@ -175,7 +183,7 @@ export const quakes: Action<ListParams, { data: UsgsCollection; fetchedAt: numbe
     // 葉はすべてスカラー（ModelRow）＝生配列ではない。トークンコスト↑と引き換えに調査の射程を広げる。
     const topEvents: ModelRow[] = [...s.quakes]
       .sort((a, b) => b.mag - a.mag)
-      .slice(0, 5)
+      .slice(0, ADDRESSABLE_TOP_N)
       .map((r) => ({ id: r.id, place: r.place, mag: r.mag, depthKm: r.depthKm }));
     return {
       count: s.count,

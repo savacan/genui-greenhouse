@@ -22,6 +22,7 @@ pnpm --filter aftershock dev         # → http://localhost:3102（Phase B/C 以
 - **境界の特定と修正 ✅**（[`../../docs/aftershock.md`](../../docs/aftershock.md) §8）— 複合クエリ（「トップ3比較」）は当初 thrash で1件しか組めなかった（firewall が単一 `strongestEventId` しか戻さず #2/#3 を名指せない）。(a) `quakes.toModel` に addressable list `topEvents`、(b) `$state` を per-tool-call 名前空間（`Action.instanceKey`）にして再走 → **4手で収束・3イベントを横並び比較・トークンはむしろ減少**（12.5k→7.1k）。線を適切に広げると多エンティティ調査は性能・コスト両取りだった。
 - **案A vs 案B 対照 ✅**（§9・`app/api/generate-terminal/route.ts`）— compose をループに畳む案B（終端 `renderSpec`）を実装し A/B。firewall（機密）は両者保つ。だが案B はモデルが反復構文を発明（`${id}` 補間・`state` への足場 inline）して比較セクションが描画不能＋トークン約3.9倍。**describe()／2回呼び分けは「concrete 列挙を強制する」ために load-bearing**（パス発見のためではない）。当初予想「案Bは生データを spec に漏らす」は外れ＝漏れるのでなく spec が壊れる。
 - **多ターン会話 ✅**（§10）— route を履歴対応（`buildTurnPrompt`・載せるのは**ユーザー問いの流れだけ**＝データはターンまたぎでも持ち越さない）。turn1「いちばん大きい地震を詳しく」→ turn2「**その震源**の周りは？」で参照解決○・remount○・**ターンまたぎでも文脈が肥大しない**（入力トークン base 1281→1367）。代償＝$state 非持ち越しゆえ参照フォローアップでも再フェッチ（再フェッチ税）。
+- **「濃すぎ」側＝トップN拡大の限界 ✅**（§11・`ADDRESSABLE_TOP_N`）— 射程は線幅に正比例（cap=5→トップ8は静かに5件 truncate／cap=10→トップ10を208要素で coherent 組成）。**「濃すぎ」はトークン肥大ではない**（10件でも totalIn≈10.8k＝firewall が文脈を膨らませない）。本当の上限は **wall-clock 遅延（10件で2.9分）と盤面の情報過多**。線幅は「待ち時間と1画面の情報量」で決める（既定5がスイートスポット）。
 
 ## スタック
 
