@@ -185,3 +185,26 @@ experiments/02-aftershock/
 - **firewall は広げても無傷**: topEvents を載せても quakes の keptOut は 80%（生 `quakes[]` 配列・products・hourly 等は文脈外のまま）。「addressable な短い scalar-record list」だけを通す ② の線引きは、生配列漏れを起こさずに多エンティティ能力を解錠した。
 - 境界の地図が**両端で閉じた**: 細い線=単一ドリル○/多エンティティ×（thrash）、太い線=多エンティティ○（収束・低コスト）。残る観察軸は「線をどこまで太らせると今度は濃すぎ（肥大・漏れ）に転ぶか」＝より多エンティティ（トップ10比較等）・多ターンでのスケール。
 - 次の検証候補: トップ N をさらに増やしたときの肥大カーブ／案B（終端 renderSpec）での spec 経路漏れ比較／exp03（別の型・題材で breadth）。
+
+---
+
+## 9. 案B 観察結果 — 終端 renderSpec（compose をループに畳む）（2026-06-25 ライブ・Azure OpenAI・計測込み）
+
+§3 で Phase 1 に温存していた案B（compose を別 `streamText` でなく、ループのモデル自身が終端 tool `renderSpec` で spec を吐く）を、案A（`app/api/generate/route.ts`）の対照として `app/api/generate-terminal/route.ts` に実装し、同一の「トップ3比較」クエリで A/B した。当初の予想は「モデルは生配列のパスを firewall の向こうに持つので、リッチな配列部品をバインドできず劣化する」だったが、結果は**それを裏切る形でより面白かった**。
+
+### セットアップ
+- 案A の tool 工場を流用し `done` を `renderSpec` に差し替え（`stopWhen: hasToolCall("renderSpec")`）。system に gather 規律＋**カタログ文法（`catalog.prompt()`）**を載せ、describe() のパス地図は渡さない（モデルが見るのは ref＋スカラー＋文法だけ）。
+- 終端 tool の入力は **緩く**（`z.object({spec: z.any()})`）受け、妥当性は後段で `catalog.zodSchema().safeParse` ＋ `catalog.validate` で自分で測る。理由: `catalog.zodSchema()` を tool 入力スキーマに使うと**スキーマがモデルの構造作りを肩代わり**して「文法だけで自己組成できるか」を測れない。※最初その strict 版で試すと、全要素が `visible` を省いただけで spec 全体が弾かれ `execute` が一度も走らず＝盤面が完全に空になった。**終端 tool に厳格スキーマを噛ませる設計は、この一律 `visible` 欠落で脆く全崩れする**のも一次データ。
+
+### 観察（n=3・確率的にブレた）
+gather フェーズは案A と同一に綺麗に回った（quakes×1 → quakeDetail×3 → weather×3,nearby×3 → renderSpec）。各手 textLen=0・生配列は文脈外＝**firewall（データ機密）は compose アーキに依らず保たれた**（モデルは生 nodalPlanes/hourly/articles を一度も見ない）。だが renderSpec が吐いた spec は毎回違う形で壊れた:
+- **run A（templated）**: 24要素・$state 24本・全名前空間に展開し、**concrete な per-instance パスを正しく再構成**した（`/quakeDetail/us6000t7zp`、`/weather/10.44_-68.47`…）。しかし同時に **json-render に無い templating を発明**＝`${id}`/`${weatherKey}` を $state ポインタ文字列に直書きし、`state.compare.events`（3件の足場配列）を spec に inline。1枚の `eventCard` を3イベントに repeat させるつもりが、`${id}` は literal 文字列なので解決されず**比較セクション丸ごと dead**。実描画では概要＋ランキング（concrete bind）は出るが「イベント別の比較」見出しの下が空。
+- **run B（hallucinated namespace）**: 概要中心・$state 8本のうち `/notes`（存在しない名前空間）を幻覚。
+- 共通: 全要素 `visible` 省略で zodValid=false（22–31 issues）。
+- **コスト**: totalIn ≈ 27.4k（案A 7.1k の約3.9倍）。カタログ文法を system に積むので、その重量が**全 gather 手に乗る**（案A は compose の1回だけ）。
+
+### 地図エントリ（この対照の成果）
+- **予想は外れた・もっと精密だった**: モデルは firewall の向こうのパスを「見つけられない」のではない（concrete な per-instance パスは ref から再構成できた）。**詰まるのは反復（iteration）の構文**。describe()＋案A の compose プロンプトが「この concrete なパス群にバインドせよ・発明するな」と**明示列挙**を与えるのに対し、案B は文法だけ。すると agentic なモデルは「N件をループで回す」抽象に手を伸ばし、json-render が（repeat/`$item` は持つのに）`${}` 補間という持たない構文を**でっち上げて**描画不能になる。
+- **describe 層／2回呼び分けは load-bearing**: パス発見のためでなく、**「テンプレート反復でなく concrete 列挙を強制する」ため**。案A の分離は飾りでなく、多エンティティ盤面を concrete かつ描画可能に保つ仕掛け。しかも安い（文法が全手に乗らない）。
+- **firewall（機密）と compose アーキは直交**: 生配列は `toModelOutput` が compose 方式に依らず締め出す。案B で崩れるのは「機密」でなく「spec バインドの正しさ／描画可能性」。§7④の「案B に寄せた瞬間に漏れる」は**外れ**＝漏れるのは生データでなく、spec が壊れるだけ（線の引き場所として案A優位の理由はコストと描画堅牢性であって機密ではない）。
+- 注意: n=3 と小さく、案B の壊れ方は確率的（templated / 幻覚名前空間）。だが方向（案B は安定して working な多エンティティ盤面を出せない・案A は出せる）は3回とも一致。
