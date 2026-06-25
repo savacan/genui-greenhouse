@@ -30,7 +30,15 @@ export function buildToolSet(ctx: ActionContext, store: StateStore): ToolSet {
           const hint = a.describe(slice);
           const ref = store.put(a.id, slice, hint);
           store.markStep(a.id, "done", hint.summary);
-          return { ref, model: a.toModel(slice), slice, hint };
+          const model = a.toModel(slice);
+          // 部分ファイアウォールの measure: モデルに戻すバイト vs $state に退避する生バイト。
+          // keptOut% が高いほど「生データを文脈から締め出せている」。
+          if (process.env.NODE_ENV !== "production") {
+            const mB = JSON.stringify(model).length;
+            const sB = JSON.stringify(slice).length;
+            console.log(`[firewall] ${a.id}: model=${mB}B slice=${sB}B keptOut=${Math.round((1 - mB / Math.max(1, sB)) * 100)}%`);
+          }
+          return { ref, model, slice, hint };
         } catch (e) {
           // soft-degrade: throw せず error を slice/hint に。モデルは error を見て次手を決める
           // （1ツール失敗で loop 全体を落とさない・compose は error カードを描ける）。

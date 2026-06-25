@@ -140,3 +140,23 @@ experiments/02-aftershock/
 - **中間散文漏れ** → 案A は `consumeStream()` で客に出さないが、散文を書くこと自体がトークンを食う。「中間は tool-call のみ」は **prompt 規律であって API 保証でない**（守られるかが観察対象）。
 - **観察したい破綻仮説**: ①部分ファイアウォールは chain 2段（drill→weather/nearby）まで成立するが3段以上で要約が薄くなり誤手が増える？ ②agentic の自由度は初回だけ良くて死に時間（直列N手）が体感を殺す？ per-step ステッパで救えるか。 ③洋上震源（大地震の常態）で nearby 空のとき、`offshore`/`count` だけでモデルが正しく諦められるか＝薄い要約での自律判断の限界。 ④案A（compose 分離）は漏れないが案B（終端 renderSpec）に寄せた瞬間に漏れる＝「どこまで agentic にできるか」の実用ライン。
 - **01 から持ち越す既知リスク**: StateProvider remount（`key={assistantId}` 必須・multi-step は「loop 後に全 slice を1発 flush してから spec 解決」で回避）/ `$format` はスカラーのみ / SVG・3D の hydration & layout-breakout（`min-width:0`+`position:absolute`+`ResizeObserver`+`ssr:false`）。
+
+---
+
+## 8. Phase C 観察結果 — 部分ファイアウォールの境界（2026-06-25 ライブ・Azure gpt-5.2・計測込み）
+
+計器: `route.ts onStepFinish` が各手の `usage.inputTokens`（文脈肥大カーブ）と tool 選択・中間散文長を、`tools.ts` が `toModel` バイト vs 生 slice バイト（keptOut%）を dev ログに出す。
+
+### 成立した側（単一エンティティ・深さ3）
+「最大の地震の震源、今どんな天気で周りに何がある？」→ **4手**: `quakes → quakeDetail → [weather, nearby 並列] → done`。入力トークンカーブ `[1025,1154,1264,1464]`（緩やか）、各手 **`textLen=0`（中間散文ゼロ）**、firewall **keptOut 39–97%**（quakes は 6500B→224B=97%）。スカラー要約（`strongestEventId`/`lat,lon`/`offshore`/`count`）だけで次手選択は正確。**→ 部分ファイアウォールと agentic ループは、単一エンティティのドリルダウンでは両立する。**
+
+### 破綻した側（複合・多エンティティ）= 境界
+「最近の大きい地震トップ3を、それぞれの震源の天気と周りまで調べて比べて」→ **8手に膨張・モデルが thrash**（`quakes` を3回・同一イベントを再ドリル）、入力トークン `1038→2056`（2倍）、最終盤面は **1イベント分しか組めず要求（3件比較）を満たせなかった**。
+
+**根因は firewall の線そのもの**: `quakes.toModel` は **単一の `strongestEventId` しか返さない** → モデルは**2位・3位のイベント ID を一度も受け取れない**（それらは `$state` 側＝ファイアウォールの向こう）。だから #2/#3 をドリルできず、`quakes` を撃ち直し→#1 を再ドリル→諦めて `done`。firewall 自体は無傷（散文ゼロ・生配列は文脈に出ず）だが、**多エンティティ調査には薄すぎた**。加えて store の per-tool-id 名前空間が、仮に複数ドリルできても slice を後勝ちで畳む（§設計の既知リスク）。
+
+### 地図エントリ（この実験の成果）
+- **「スカラー要約 firewall」にはスイートスポットがある**: 単一エンティティのドリルには十分、多エンティティ調査には薄すぎ。**薄すぎは「誤手」ではなく「達成不能＋thrash」として出た**（モデルは賢く振る舞ったが、線の向こうの情報に手が届かなかった）。
+- **複合 agentic 調査を支えるには firewall を意図的に広げる**必要がある: (a) list 型結果の `toModel` に**短い addressable list（id+ラベル+主要スカラー）**を載せて #2/#3 を名指しできるようにする、(b) `$state` を **per-tool-call 名前空間**（`quakeDetail/<eventId>`）にして並列・反復ドリルを各スロットに保持する。両方とも「トークンコスト↑ ↔ 多エンティティ能力↑」のトレードオフで、**このトレードの位置こそ実験が突き止めたかったもの**。
+- 死に時間/トークン肥大は**この規模では破綻要因ではない**（thrash の8手でも totalIn≈12.5k）。効くのは「線の太さ ↔ 調査の射程」。
+- 次の検証候補: 上記 (a)(b) を入れて「トップ3比較」が組めるか再走（線を広げた効果の測定）／案B（終端 renderSpec）での spec 経路漏れ比較。

@@ -24,7 +24,7 @@ import type { ActionContext, Stage } from "@/lib/monitor/types";
 export const maxDuration = 60;
 
 const COMPOSE_SYSTEM = catalog.prompt({ mode: "inline" });
-const MAX_STEPS = 8;
+const MAX_STEPS = 14; // 複合・多イベントの深い chain も踏めるように（境界観察用）。上限に達したら部分結果で compose。
 
 const AGENT_SYSTEM = (today: string) =>
   [
@@ -85,10 +85,13 @@ export async function POST(req: Request) {
         onStepFinish: (sr) => {
           stepNo++;
           const calls = sr.toolCalls?.map((c) => c.toolName) ?? [];
-          // 観察ログ（死に時間・firewall・手選択の measure）。中間散文(sr.text)が非空なら規律破れ。
+          // 観察ログ（部分ファイアウォールの measure）: 手選択・中間散文(非空なら規律破れ)・
+          // この手でモデルが受けた入力トークン(=文脈の肥大カーブ)。
           if (process.env.NODE_ENV !== "production") {
+            const u = sr.usage;
             console.log(
-              `[loop] step ${stepNo}: tools=[${calls.join(",")}] textLen=${(sr.text ?? "").length}`,
+              `[loop] step ${stepNo}: tools=[${calls.join(",")}] textLen=${(sr.text ?? "").length}` +
+                ` inTok=${u?.inputTokens ?? "?"} outTok=${u?.outputTokens ?? "?"}`,
             );
           }
           const cur = calls.filter((c) => c !== "done").join(" → ") || "thinking";
@@ -98,6 +101,21 @@ export async function POST(req: Request) {
 
       // 案A: loop のテキスト/ツールイベントは client に流さない（中間散文漏れを構造で防ぐ）。
       await loop.consumeStream();
+
+      // 観察サマリ: 文脈の肥大カーブ（各手の入力トークン）＝「濃すぎ」境界の一次データ。
+      if (process.env.NODE_ENV !== "production") {
+        try {
+          const steps = await loop.steps;
+          const curve = steps.map((s) => s.usage?.inputTokens ?? 0);
+          const total = await loop.totalUsage;
+          console.log(
+            `[loop-summary] steps=${steps.length} inputTokenCurve=[${curve.join(",")}]` +
+              ` totalIn=${total?.inputTokens ?? "?"} totalOut=${total?.outputTokens ?? "?"} tools=${store.stepLog().map((s) => `${s.tool}:${s.status}`).join(",")}`,
+          );
+        } catch {
+          /* observation only */
+        }
+      }
 
       // ② 生 slice を initialState に flush（spec より先にシード）。
       const state = store.snapshot();
