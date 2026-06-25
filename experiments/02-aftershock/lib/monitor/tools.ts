@@ -32,8 +32,13 @@ export function buildToolSet(ctx: ActionContext, store: StateStore): ToolSet {
           store.markStep(a.id, "done", hint.summary);
           return { ref, model: a.toModel(slice), slice, hint };
         } catch (e) {
+          // soft-degrade: throw せず error を slice/hint に。モデルは error を見て次手を決める
+          // （1ツール失敗で loop 全体を落とさない・compose は error カードを描ける）。
           store.markStep(a.id, "error", String(e));
-          throw e;
+          const msg = String(e);
+          const errHint = { summary: `${a.id} のデータ取得に失敗しました。`, paths: [], notes: [`fetch failed: ${msg}`] };
+          const ref = store.put(a.id, { error: msg }, errHint);
+          return { ref, model: { error: msg }, slice: { error: msg }, hint: errHint };
         }
       },
       // ★ firewall: モデルに戻すのはスカラー要約だけ（生 slice は絶対に入れない）。

@@ -40,7 +40,14 @@ export class StateStore {
 
   // --- per-step progress（Phase C のステッパ用） ---
   markStep(tool: string, status: "pending" | "done" | "error", note?: string): void {
-    this.steps.push({ tool, status, note });
+    // 同 tool の既存行を upsert（pending→done/error）。無ければ追加。
+    const existing = this.steps.find((s) => s.tool === tool);
+    if (existing) {
+      existing.status = status;
+      if (note) existing.note = note;
+    } else {
+      this.steps.push({ tool, status, note });
+    }
   }
   stepLog(): Array<{ tool: string; status: "pending" | "done" | "error"; note?: string }> {
     return this.steps.map((s) => ({ ...s }));
