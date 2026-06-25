@@ -39,8 +39,27 @@ const AGENT_SYSTEM = (today: string) =>
     `- quakeDetail の戻り値の lat/lon を weather/nearby の引数にそのまま渡す（緯度経度を自分で発明しない）。`,
     `- 震源が日本周辺なら nearby は lang="ja"。`,
     `- 中間ステップで散文を書かない（tool 呼び出しだけ）。`,
+    `- フォローアップの問い（「その中で」「さっきの」「それ」「もっと詳しく」等）は、これまでの会話の流れを踏まえて何を指すか解釈する。ただし**データは毎ターンこのターンで取り直す**（前ターンの $state は参照できない・盤面は毎回組み直す）。`,
     `- 十分に集まったら done を呼んで終わる。最大 ${MAX_STEPS} 手。`,
   ].join("\n");
+
+/**
+ * 多ターン: ユーザーの問いの流れを prompt に載せる（参照的フォローアップの解釈用）。
+ * data はサーバ側で毎ターン取り直すので、履歴に載せるのは**ユーザーのテキストだけ**＝
+ * ターンをまたいで生データもスカラー要約も文脈に積まない（firewall をターン境界でも維持）。
+ */
+function buildTurnPrompt(allUserTexts: string[]): string {
+  const current = allUserTexts.at(-1) ?? "";
+  const prior = allUserTexts.slice(0, -1);
+  if (!prior.length) return current;
+  return [
+    `これまでの会話（ユーザーの問いの流れ）:`,
+    ...prior.map((q, i) => `  ${i + 1}. ${q}`),
+    ``,
+    `今の問い: ${current}`,
+    `※ 「その中で」「さっき」「それ」等は上の流れを指す。文脈を踏まえて解釈し、必要なデータは今のターンで取り直すこと。`,
+  ].join("\n");
+}
 
 function userTexts(messages: UIMessage[]): string[] {
   return messages
@@ -58,8 +77,10 @@ function userTexts(messages: UIMessage[]): string[] {
 export async function POST(req: Request) {
   const body = await req.json();
   const messages: UIMessage[] = body.messages ?? [];
-  const query = userTexts(messages).at(-1) ?? "";
+  const allUserTexts = userTexts(messages);
+  const query = allUserTexts.at(-1) ?? "";
   if (!query) return new Response(JSON.stringify({ error: "query required" }), { status: 400 });
+  const promptText = buildTurnPrompt(allUserTexts); // 多ターン: 参照的フォローアップ用に問いの流れを載せる
 
   const model = getModel();
   const today = new Date().toISOString().slice(0, 10);
@@ -84,7 +105,7 @@ export async function POST(req: Request) {
         tools,
         stopWhen: [stepCountIs(MAX_STEPS), hasToolCall("done")],
         system: AGENT_SYSTEM(today),
-        prompt: query,
+        prompt: promptText,
         onStepFinish: (sr) => {
           stepNo++;
           const calls = sr.toolCalls?.map((c) => c.toolName) ?? [];

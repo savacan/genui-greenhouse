@@ -208,3 +208,19 @@ gather フェーズは案A と同一に綺麗に回った（quakes×1 → quakeD
 - **describe 層／2回呼び分けは load-bearing**: パス発見のためでなく、**「テンプレート反復でなく concrete 列挙を強制する」ため**。案A の分離は飾りでなく、多エンティティ盤面を concrete かつ描画可能に保つ仕掛け。しかも安い（文法が全手に乗らない）。
 - **firewall（機密）と compose アーキは直交**: 生配列は `toModelOutput` が compose 方式に依らず締め出す。案B で崩れるのは「機密」でなく「spec バインドの正しさ／描画可能性」。§7④の「案B に寄せた瞬間に漏れる」は**外れ**＝漏れるのは生データでなく、spec が壊れるだけ（線の引き場所として案A優位の理由はコストと描画堅牢性であって機密ではない）。
 - 注意: n=3 と小さく、案B の壊れ方は確率的（templated / 幻覚名前空間）。だが方向（案B は安定して working な多エンティティ盤面を出せない・案A は出せる）は3回とも一致。
+
+---
+
+## 10. 多ターン会話 — 参照的フォローアップ（2026-06-25 ライブ・Azure OpenAI）
+
+§7 の未検証項目「多ターンで loop/firewall/remount が保つか」。route（案A）は履歴を捨てていた（`userTexts(...).at(-1)`）ので、`buildTurnPrompt` で**ユーザーの問いの流れだけ**を prompt に載せた（データは載せない＝ターン境界でも firewall 維持）。
+
+### 検証（2ターン・ライブ）
+- turn1「いちばん大きい地震を詳しく」→ M7.5 Yumare の detail+weather 盤面（quakes→quakeDetail→[weather,nearby]→done・4手）。
+- turn2「**その震源**の周りには何がある？」（純粋に参照的＝turn1 無しでは指示対象が存在しない）→ **「その震源」を M7.5 Yumare と解決**し、quakes→quakeDetail（lat/lon を再取得）→nearby×2→weather→done（6手）。盤面は近傍フォーカスに remount し、Yumare 近傍=0件を empty-state で正しく描画。
+
+### 地図エントリ
+- **参照解決○**: ユーザーテキストの履歴だけで「その震源」が解決できた（データを持ち越さなくても文脈で十分）。
+- **firewall はターン境界でも保つ**: turn2 の入力トークンは turn1 とほぼ同じ base（1367 vs 1281）＝**ターンをまたいで文脈が肥大しない**。生データもスカラー要約も持ち越さず毎ターン取り直す設計（越境するのは user-text だけ）。
+- **remount○**: `key={assistantId}` で盤面がクリーンに差し替わる（01 からの持ち越し設計が多ターンでも機能）。
+- **トレード（再フェッチ税）**: $state を持ち越さないので、参照的フォローアップでもモデルは quakes→quakeDetail を撃ち直して lat/lon を再取得してから nearby に進む（概念上は「既知イベントに nearby を足す」1手なのに6手）。クリーンな firewall（越境データゼロ）の代償＝冗長な再取得。将来 scalar ref（eventId/lat/lon）だけ前ターンから持ち越せば省けるが、それは §8(a) と同じ「線を広げる」判断（越境 firewall を太らせる＝射程↔コストのトレード）。
