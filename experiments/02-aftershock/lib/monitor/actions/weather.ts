@@ -74,6 +74,8 @@ export const weather: Action<Params, OpenMeteoRaw, WeatherState> = {
   id: "weather",
   when: "Current weather + a short temperature trend at a lat/lon (e.g. an earthquake epicenter from quakeDetail). Pass the epicenter's latitude & longitude.",
   params,
+  // ★ §8 (b) per-tool-call 名前空間: 丸めた緯度経度ごとに別スロット → 複数震源の天気が並存（後勝ち回避）。
+  instanceKey: (p) => `${p.latitude.toFixed(2)}_${p.longitude.toFixed(2)}`,
 
   async fetch(p, ctx) {
     const url =

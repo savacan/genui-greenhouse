@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Action, StateHint, ModelSummary } from "../types";
+import type { Action, StateHint, ModelSummary, ModelRow } from "../types";
 import { fetchJson } from "../fetchJson";
 
 // ---------- shared raw shapes ----------
@@ -170,6 +170,13 @@ export const quakes: Action<ListParams, { data: UsgsCollection; fetchedAt: numbe
   },
 
   toModel(s): ModelSummary {
+    // ★ §8 (a) addressable list: 上位イベントを id 付きで戻す → モデルが #2/#3 を名指して
+    // それぞれ quakeDetail できる。単一 strongest* だけだと多エンティティ比較で thrash した（境界の修正）。
+    // 葉はすべてスカラー（ModelRow）＝生配列ではない。トークンコスト↑と引き換えに調査の射程を広げる。
+    const topEvents: ModelRow[] = [...s.quakes]
+      .sort((a, b) => b.mag - a.mag)
+      .slice(0, 5)
+      .map((r) => ({ id: r.id, place: r.place, mag: r.mag, depthKm: r.depthKm }));
     return {
       count: s.count,
       maxMag: s.maxMag,
@@ -177,6 +184,7 @@ export const quakes: Action<ListParams, { data: UsgsCollection; fetchedAt: numbe
       strongestPlace: s.strongest?.place ?? null,
       strongestMag: s.strongest?.mag ?? null,
       strongestDepthKm: s.strongest?.depthKm ?? null,
+      topEvents,
       tsunamiFlaggedCount: s.tsunamiFlaggedCount,
       redAlertCount: s.redAlertCount,
       windowLabel: s.windowLabel,
@@ -231,6 +239,9 @@ export const quakeDetail: Action<DetailParams, UsgsFeature, QuakeDetailState> = 
   id: "quakeDetail",
   when: "Deep detail for ONE earthquake by event id: focal mechanism (nodal planes / fault type), ShakeMap intensity image, PAGER alert. Its lat/lon feed weather and nearby.",
   params: detailParams,
+  // ★ §8 (b) per-tool-call 名前空間: eventId ごとに別スロット（/quakeDetail/<eventId>/...）。
+  // これで複数イベントのドリルが後勝ちで畳まれず並存できる。
+  instanceKey: (p) => p.eventId,
 
   async fetch(p, ctx) {
     // eventid クエリは単一 Feature を返す（一覧は FeatureCollection）。404 は plain-text → fetchJson が res.ok 先読みで degrade。

@@ -11,9 +11,16 @@ export interface ActionContext {
 /** Hard data failure (vs. soft-degrade which returns a partial state). */
 export class ActionDataError extends Error {}
 
-/** モデルに戻してよいのはスカラー（とスカラー配列）だけ。生配列・オブジェクトは禁止＝ファイアウォール。 */
+/** モデルに戻してよいスカラー葉。 */
 export type ModelScalar = string | number | boolean | null;
-export type ModelSummary = Record<string, ModelScalar | ModelScalar[]>;
+/** flat な scalar-record = addressable list の1要素（例: 1地震の {id,place,mag}）。葉は必ずスカラー。 */
+export type ModelRow = Record<string, ModelScalar>;
+/**
+ * モデルに戻してよい形。スカラー / スカラー配列 / **flat scalar-record の bounded list**（addressable list）。
+ * §8 境界の修正で ② を採用＝「#2/#3 を名指せる短いリスト」を明示的に許して線を1段広げた。
+ * 生のネスト配列・blob・オブジェクトの入れ子は依然 NG（＝ファイアウォール）。
+ */
+export type ModelSummary = Record<string, ModelScalar | ModelScalar[] | ModelRow[]>;
 
 /**
  * Paths + meaning + counts handed to the COMPOSE LLM（最終 spec 構成用）。
@@ -61,8 +68,18 @@ export interface Action<
   compute(raw: R, params: P): S;
   /** $state paths + scalar summary for the COMPOSE prompt (gets S so it can emit COUNTS, never arrays). */
   describe(state: S): StateHint;
-  /** ★ partial firewall: the SCALARS re-injected into model context per loop step. NEVER arrays of objects. */
+  /**
+   * ★ partial firewall: per-step にモデル文脈へ戻すスカラー要約。生配列は NG だが、
+   * addressable な短い scalar-record list（ModelRow[]）は明示的に許す（§8 境界を意図して1段広げた）。
+   */
   toModel(state: S): ModelSummary;
+  /**
+   * $state 内でこの呼び出しを一意に分ける instance key（省略 = tool-id 単一スロット＝後勝ち畳み）。
+   * params から導く（pending/error 時も使えるよう state でなく params を見る）。
+   * 例: quakeDetail=eventId / weather・nearby=丸めた緯度経度。これで同一 tool の複数ドリルが
+   * 別スロット（/id/<key>/...）に並存する＝per-tool-call 名前空間（§8 (b)）。
+   */
+  instanceKey?(params: P): string | undefined;
 }
 
 export type AnyAction = Action<any, any, any>;

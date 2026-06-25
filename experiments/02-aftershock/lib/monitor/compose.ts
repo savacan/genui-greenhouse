@@ -29,7 +29,10 @@ export function buildComposePrompt(query: string, parts: ComposePart[]): string 
   return [
     `ユーザーの問い: "${query}"`,
     multi
-      ? `エージェントが複数の手でデータを集めた。下の全セクションのデータを1画面に組む（見出しで区切る）。`
+      ? [
+          `エージェントが複数の手でデータを集めた。下の全セクションのデータを1画面に組む（見出しで区切る）。`,
+          `セクション名が "tool/xxx" 形式で同じ tool が複数あるとき（例: quakeDetail/<id> が複数、weather/<座標> が複数）は別々のエンティティ（別の地震・別の震源）。比較できるよう各エンティティを Card にまとめ、横並び/縦積みの Stack に並べる（1エンティティ = 1 Card に detail＋weather＋nearby をまとめると読みやすい）。`,
+        ].join("\n")
       : `データは取得・計算済みで state に入っている。`,
     `次の $state パスにだけ {"$state":"/path"} でバインドして UI を組むこと（パスを発明しない・生値を埋め込まない）:`,
     sections.join("\n\n"),

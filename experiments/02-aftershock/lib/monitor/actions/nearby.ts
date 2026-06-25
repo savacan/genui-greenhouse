@@ -49,6 +49,8 @@ export const nearby: Action<
   id: "nearby",
   when: "Wikipedia articles geotagged near a lat/lon (towns, landmarks around an epicenter). Pass latitude & longitude; lang='ja' for Japan. Empty over open ocean.",
   params,
+  // ★ §8 (b) per-tool-call 名前空間: 丸めた緯度経度ごとに別スロット → 複数震源の近傍が並存（後勝ち回避）。
+  instanceKey: (p) => `${p.latitude.toFixed(2)}_${p.longitude.toFixed(2)}`,
 
   async fetch(p, ctx: ActionContext) {
     const base = `https://${p.lang}.wikipedia.org`;

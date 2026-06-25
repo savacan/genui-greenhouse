@@ -23,12 +23,15 @@ export function buildToolSet(ctx: ActionContext, store: StateStore): ToolSet {
       inputSchema: a.params,
       async execute(input: unknown) {
         const p = a.params.parse(input);
+        // per-tool-call 名前空間 key（quakeDetail=eventId / weather・nearby=丸め座標）。
+        // parse 直後に取るので成功・失敗どちらの put でも同じスロットに載る（失敗が成功を畳まない）。
+        const inst = a.instanceKey?.(p);
         store.markStep(a.id, "pending");
         try {
           const raw = await a.fetch(p, ctx);
           const slice = a.compute(raw, p);
           const hint = a.describe(slice);
-          const ref = store.put(a.id, slice, hint);
+          const ref = store.put(a.id, slice, hint, inst);
           store.markStep(a.id, "done", hint.summary);
           const model = a.toModel(slice);
           // 部分ファイアウォールの measure: モデルに戻すバイト vs $state に退避する生バイト。
@@ -45,7 +48,7 @@ export function buildToolSet(ctx: ActionContext, store: StateStore): ToolSet {
           store.markStep(a.id, "error", String(e));
           const msg = String(e);
           const errHint = { summary: `${a.id} のデータ取得に失敗しました。`, paths: [], notes: [`fetch failed: ${msg}`] };
-          const ref = store.put(a.id, { error: msg }, errHint);
+          const ref = store.put(a.id, { error: msg }, errHint, inst);
           return { ref, model: { error: msg }, slice: { error: msg }, hint: errHint };
         }
       },

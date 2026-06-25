@@ -143,7 +143,7 @@ experiments/02-aftershock/
 
 ---
 
-## 8. Phase C 観察結果 — 部分ファイアウォールの境界（2026-06-25 ライブ・Azure gpt-5.2・計測込み）
+## 8. Phase C 観察結果 — 部分ファイアウォールの境界（2026-06-25 ライブ・Azure OpenAI・計測込み）
 
 計器: `route.ts onStepFinish` が各手の `usage.inputTokens`（文脈肥大カーブ）と tool 選択・中間散文長を、`tools.ts` が `toModel` バイト vs 生 slice バイト（keptOut%）を dev ログに出す。
 
@@ -159,4 +159,29 @@ experiments/02-aftershock/
 - **「スカラー要約 firewall」にはスイートスポットがある**: 単一エンティティのドリルには十分、多エンティティ調査には薄すぎ。**薄すぎは「誤手」ではなく「達成不能＋thrash」として出た**（モデルは賢く振る舞ったが、線の向こうの情報に手が届かなかった）。
 - **複合 agentic 調査を支えるには firewall を意図的に広げる**必要がある: (a) list 型結果の `toModel` に**短い addressable list（id+ラベル+主要スカラー）**を載せて #2/#3 を名指しできるようにする、(b) `$state` を **per-tool-call 名前空間**（`quakeDetail/<eventId>`）にして並列・反復ドリルを各スロットに保持する。両方とも「トークンコスト↑ ↔ 多エンティティ能力↑」のトレードオフで、**このトレードの位置こそ実験が突き止めたかったもの**。
 - 死に時間/トークン肥大は**この規模では破綻要因ではない**（thrash の8手でも totalIn≈12.5k）。効くのは「線の太さ ↔ 調査の射程」。
-- 次の検証候補: 上記 (a)(b) を入れて「トップ3比較」が組めるか再走（線を広げた効果の測定）／案B（終端 renderSpec）での spec 経路漏れ比較。
+
+### 線を広げた側（(a)(b) 適用後・2026-06-25 再走・同じ「トップ3比較」クエリ）
+
+§8 の (a)(b) を実装して、破綻したのと**同一のクエリ**（「最近の大きい地震トップ3を、それぞれの震源の天気と周りまで調べて比べて」）を再走した。
+
+- **(a) `quakes.toModel` に addressable list**: `topEvents: ModelRow[]`（上位5件の `{id,place,mag,depthKm}`）を追加。型は ②（`ModelSummary` を `Array<Record<string,ModelScalar>>` 許容に緩める）を採用＝「線を明示的に1段太くする」。①の文字列畳み込みは「addressability」と「文字列パース能力」が交絡して結果が読めなくなるため不採用。葉は依然スカラーのみ＝blob/生ネスト配列は禁止のまま。
+- **(b) `$state` を per-tool-call 名前空間**: `Action.instanceKey?(params)` を追加（quakeDetail=eventId / weather・nearby=丸め座標）。`StateStore.put` が `id/<key>` でスロットを分け、`snapshot()` がネスト構築、describe の固定パス `/id/...` は store が `/id/<key>/...` に注入。これで複数ドリルが後勝ちで畳まれず並存。
+- **anti-thrash 規律**: `AGENT_SYSTEM` に「複合は quakes 1回 → topEvents の id を各 quakeDetail」「同じ tool を同じ引数で二度呼ばない」を明記。compose プロンプトに「`tool/xxx` が複数 = 別エンティティ → Card を Stack で並べる」を追加。
+
+**結果（計器込みライブ・Azure OpenAI）= 破綻が解消し、しかも安くなった**:
+
+| | 細い線（before・§8 破綻側） | 太い線（after・(a)(b)） |
+|---|---|---|
+| 手数 | 8手・thrash | **4手**（`quakes` → `quakeDetail×3` → `weather×3,nearby×3` → `done`） |
+| `quakes` 呼び出し | 3回（撃ち直し） | **1回** |
+| 入力トークンカーブ | 1038→2056（2倍）・累積 ≈12.5k | **[1211,1520,1885,2482]・totalIn=7098** |
+| 中間散文 | 0（firewall 無傷） | **0（各手 textLen=0）** |
+| firewall keptOut | — | quakes 80%（684B/3416B）・quakeDetail 68–70%・weather 77%・nearby 38% |
+| 組まれた盤面 | 1イベントのみ（要求未達） | **3イベントを横並び Card で比較**（M7.5 Yumare / M7.2 Yumare / M6.9 Kuji）。各 Card に PAGER 帯・ビーチボール・ShakeMap・天気 sparkline・近傍。断層型も正しく差が出た（Venezuela=横ずれ / Kuji=逆断層）。 |
+
+**地図エントリ（この再走の成果）**:
+- **線を広げたら本当に組めた**: `$state` に 3×quakeDetail＋3×weather＋3×nearby が別スロットで並存し、compose が全 instance-qualified パスにバインドして3面比較を自己組成。per-tool-call 名前空間（(b)）が無いと後勝ちで1枠に潰れるので、(a) と (b) は**両方**必要だった（(a) だけでは ID は名指せても slice が畳まれる）。
+- **トレードは予想と逆だった**: 「トークン↑ ↔ 射程↑」を見込んでいたが、実測は**射程↑ かつ コスト↓**（7.1k < 12.5k）。理由＝細すぎる線が引き起こしていたのは「賢い諦め」ではなく **thrash（撃ち直し）であり、それ自体が高コスト**だった。addressable list を渡した瞬間にモデルは fan-out（1→3→6→done）を一直線に実行し、撃ち直しが消えた。**この規模では「firewall を適切に広げる」は性能・コスト両取り**。
+- **firewall は広げても無傷**: topEvents を載せても quakes の keptOut は 80%（生 `quakes[]` 配列・products・hourly 等は文脈外のまま）。「addressable な短い scalar-record list」だけを通す ② の線引きは、生配列漏れを起こさずに多エンティティ能力を解錠した。
+- 境界の地図が**両端で閉じた**: 細い線=単一ドリル○/多エンティティ×（thrash）、太い線=多エンティティ○（収束・低コスト）。残る観察軸は「線をどこまで太らせると今度は濃すぎ（肥大・漏れ）に転ぶか」＝より多エンティティ（トップ10比較等）・多ターンでのスケール。
+- 次の検証候補: トップ N をさらに増やしたときの肥大カーブ／案B（終端 renderSpec）での spec 経路漏れ比較／exp03（別の型・題材で breadth）。
