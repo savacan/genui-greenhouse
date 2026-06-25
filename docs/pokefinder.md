@@ -174,3 +174,32 @@ Checkbox: ({ props, bindings }) => {
 - `StateProvider` は `initialState` の **参照が変わると re-flatten** する実装あり → Phase C で応答ごとに spec が来ると入力 state が初期化され得る（remount で選択が飛ぶ FEEL）。§7 の観察点。
 
 **「探す」送信の設計確定**: action params に state を解決させず、`find` ハンドラ＋`onStateChange` 再構成 ref で閉じる（design §1 の通り・実機で確認）。Phase C は page の `find` を「ref の現在 shelf → `/api/generate` 再送 → サーバ findMons → 結果ボード再構成」に差し替えるだけ。
+
+---
+
+## 10. Phase C 実施ログ（単発 compose で LLM にフォームを組ませる・実 LLM 検証済み・2026-06-26）
+
+`lib/finder/compose.ts`（2モード: `buildFormPrompt` 語彙添え / `buildResultsPrompt` hint のみ）＋ `app/api/generate/route.ts`（`intent` で form/find 分岐・01 単発 compose 写経）＋ `app/page.tsx` 本体（useChat・2モード・onStateChange ref で「探す」を閉じる）＋ renderer に `ask` ハンドラ追加。:3103 で Azure OpenAI 実呼び出し・Playwright で全ループ検証。
+
+### 核の問いへの答え: LLM は two-way 入力フォームを正しく組めた（◎）
+問い「炎か飛行で素早さ高め」に対し LLM は:
+- **`$bindState` のパスを一貫して正しく**振った（`/shelf/type/fire`・`/shelf/type/flying`（TypeCheckbox.checked）・`/shelf/generationId`（Select.value）・`/shelf/minStats/speed`（Slider.value））。
+- **`spec.state` に初期選択を正しく埋めた**（fire/flying=true・speed=100）→ フォーム初期表示に反映。
+- **関係するタイプだけ出す判断**（18 個全部でなく「ほのお」「ひこう」の2つ＋「優先表示しています」の注記）。
+- find ActionButton に `"on":{"click":{"action":"find"}}` を正しく付与。
+- exp02 §9 の「無い構文の発明（`${}`）」は**起きなかった**＝出力UI（read-only）より入力UI（two-way）の方がむしろカタログ文法に素直だった。**動かす変数（GenUI の役割＝入力フォーム生成）は機能する**。
+
+### いちばんの落とし穴は LLM でなくクライアント配線（GenUI×state の本質的 gotcha）
+「探す」が**無反応**（fetch ゼロ・エラーなし）。spec は完璧（`on/click/action:"find"` 出力済み）。根因＝**json-render の `ActionProvider` が `const [handlers]=useState(initialHandlers)` で handlers を初回マウント時に凍結**（以後の prop 変化を無視）。FinderRenderer は **Compose-Live で `streaming=true` の最中にマウント**するので、`streaming=true` 版の `onFind`（即 early-return）が凍結され、ストリーム完了後も差し替わらない（同 message id で remount しないため）。
+→ 修正 = **ハンドラを安定参照（`useCallback([])`）にし、可変値（streaming/sendMessage）は ref 越しに読む**（凍結された handler でも現在値を見る）。「出力を描く」だけの 01/02 では handler が `ask` 1個で初期から確定していたので踏まなかった罠＝**GenUI に state とイベントを持たせると新たに出る配線リスク**。
+
+### データ形の知見がライブ UX に出た（Phase A #1 の実証）
+fire∩flying/speed≥100 の結果 4 件のうち 3 件が `charizard-mega-y`/`charizard`/`charizard-gmax` ＝**base 種の重複（フォーム違い）が UX を埋める**。世代を gen1 にトグルして再検索すると **charizard 1 件のみ**（mega/gmax 消滅）＝`generation/<id>` の species（base 名のみ）で**フォーム重複が自動 de-dup**（Phase A 知見#1 がライブで実証）。→ 「世代を促す」UI 既定や base-only サーバフィルタが UX レバー。
+
+### 双方向ループの FEEL（§7 観察点）
+- トグル（local・即時・サーバ往復なし）→「探す」（サーバ往復・LLM が結果ボード compose）→「別の条件でさがす」（元の問いで form を組み直し）の往復が成立。
+- **ライブのトグルがサーバに届く**ことを確認（Select を gen1 に変える → 送信 params に `generationId:1` が乗り、結果が変わった）。
+- フォームは応答ごとに `key={message.id}` で remount＝1フォーム内のトグルは保持されるが、results→再 ask で**新しいフォームは毎回ゼロから compose**（前フォームの選択は持ち越さない）。今回の「results が form を置換する」流れでは remount-flash は実害なし。**「form を残したまま live 再検索」**の設計にすると `StateProvider` の initialState 再 flatten（§9）に当たる＝次の課題。
+- 単一変数は守れた（絞り込み計算は全部サーバ findMons・クライアント計算/$math なし）。
+
+**結論**: GenUI が「動く双方向の入力フォーム」を組むのは LLM 側は十分成立する。境界はむしろ **client 側の state/handler ライフサイクル**（Compose-Live × provider の handler 凍結）と **データ形（フォーム重複）**にある。次の検証候補: 組成品質の多サンプル評定（$bindState パス一貫性・フォーム過不足・初期値の的中率をクエリ多数で）／form 永続 live 再検索（remount-flash の正面突破）。

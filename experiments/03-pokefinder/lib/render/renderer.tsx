@@ -21,20 +21,27 @@ export function FinderRenderer({
   initialState,
   loading,
   onFind,
+  onAsk,
   onStateChange,
 }: {
   spec: Spec;
   initialState: Record<string, unknown>;
   loading?: boolean;
   onFind?: () => void;
+  onAsk?: (query: string) => void;
   onStateChange?: (changes: Array<{ path: string; value: unknown }>) => void;
 }) {
   const safe = useMemo(() => sanitizeSpec(spec), [spec]);
   const handlers = useMemo(
     () => ({
       find: () => onFind?.(),
+      // 結果ボードの「別の条件でさがす」: 元の問いを投げ直してフォームを組み直す。
+      ask: (params: Record<string, unknown>) => {
+        const q = typeof params?.query === "string" ? params.query.trim() : "";
+        if (q) onAsk?.(q);
+      },
     }),
-    [onFind],
+    [onFind, onAsk],
   );
   if (!safe) return <div className="pf-fallback">ビューを構築できませんでした。</div>;
   return (
