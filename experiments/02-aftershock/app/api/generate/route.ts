@@ -39,7 +39,7 @@ const AGENT_SYSTEM = (today: string) =>
     `- quakeDetail の戻り値の lat/lon を weather/nearby の引数にそのまま渡す（緯度経度を自分で発明しない）。`,
     `- 震源が日本周辺なら nearby は lang="ja"。`,
     `- 中間ステップで散文を書かない（tool 呼び出しだけ）。`,
-    `- フォローアップの問い（「その中で」「さっきの」「それ」「もっと詳しく」等）は、これまでの会話の流れを踏まえて何を指すか解釈する。ただし**データは毎ターンこのターンで取り直す**（前ターンの $state は参照できない・盤面は毎回組み直す）。`,
+    `- フォローアップの問い（「その中で」「さっきの」「それ」「もっと詳しく」等）は、会話の流れで何を指すか解釈する。**下に「前ターンで判明した震源（eventId/lat/lon）」があれば、その lat/lon をそのまま weather/nearby に渡してよい＝同じ震源について quakes/quakeDetail を撃ち直さない**（再取得税の回避）。新しい/別の震源が要るときだけ quakes から取り直す。盤面（spec/$state）は毎ターン新規に組み直す。`,
     `- 十分に集まったら done を呼んで終わる。最大 ${MAX_STEPS} 手。`,
   ].join("\n");
 
@@ -57,7 +57,44 @@ function buildTurnPrompt(allUserTexts: string[]): string {
     ...prior.map((q, i) => `  ${i + 1}. ${q}`),
     ``,
     `今の問い: ${current}`,
-    `※ 「その中で」「さっき」「それ」等は上の流れを指す。文脈を踏まえて解釈し、必要なデータは今のターンで取り直すこと。`,
+    `※ 「その中で」「さっき」「それ」等は上の流れを指す。文脈を踏まえて解釈すること。`,
+  ].join("\n");
+}
+
+type PriorEvent = { eventId: string; place: string; mag: number; lat: number; lon: number };
+
+/**
+ * §11(#2) 再フェッチ税の回避: 直近 assistant の data-initialState（クライアントが履歴で送り返す）から
+ * **スカラーだけ**（eventId/place/mag/lat/lon）を抜き、次ターンに「再取得不要な既知震源」として渡す。
+ * 生配列（nodalPlanes/articles/hourly/quakes[]）は**載せない**＝ターン越境でも firewall を維持。
+ * これで参照的フォローアップ（「その震源の周りは？」）が quakes/quakeDetail の撃ち直しを省ける。
+ */
+function priorEntities(messages: UIMessage[]): PriorEvent[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "assistant") continue;
+    const part = m.parts.find((p) => (p as { type?: string }).type === "data-initialState") as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    const qd = part?.data?.quakeDetail as Record<string, Record<string, unknown>> | undefined;
+    if (!qd) return [];
+    const out: PriorEvent[] = [];
+    for (const e of Object.values(qd)) {
+      if (e && typeof e.eventId === "string" && typeof e.lat === "number" && typeof e.lon === "number") {
+        out.push({ eventId: e.eventId, place: String(e.place ?? ""), mag: Number(e.mag ?? 0), lat: e.lat as number, lon: e.lon as number });
+      }
+    }
+    return out; // 直近 assistant のみ見る（さらに前は遡らない）
+  }
+  return [];
+}
+
+function priorEntitiesBlock(prior: PriorEvent[]): string {
+  if (!prior.length) return "";
+  return [
+    ``,
+    `前ターンで判明した震源（再取得不要・lat/lon をそのまま weather/nearby に使える）:`,
+    ...prior.map((e) => `  - eventId=${e.eventId} M${e.mag} ${e.place} (lat=${e.lat}, lon=${e.lon})`),
   ].join("\n");
 }
 
@@ -80,7 +117,8 @@ export async function POST(req: Request) {
   const allUserTexts = userTexts(messages);
   const query = allUserTexts.at(-1) ?? "";
   if (!query) return new Response(JSON.stringify({ error: "query required" }), { status: 400 });
-  const promptText = buildTurnPrompt(allUserTexts); // 多ターン: 参照的フォローアップ用に問いの流れを載せる
+  // 多ターン: 問いの流れ＋前ターンの既知震源スカラー（再取得税の回避・生データは載せない）
+  const promptText = buildTurnPrompt(allUserTexts) + priorEntitiesBlock(priorEntities(messages));
 
   const model = getModel();
   const today = new Date().toISOString().slice(0, 10);

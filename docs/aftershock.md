@@ -240,3 +240,28 @@ gather フェーズは案A と同一に綺麗に回った（quakes×1 → quakeD
 - **「濃すぎ」はトークン肥大では**なかった: totalIn は10件でも ≈10.8k（トップ8の11.0k と同等）。**firewall が per-result を小さく保つ＋並列バッチで step 数が伸びない**ので、エンティティを増やしても文脈は肥大しない。**部分ファイアウォールの最大の美点＝多エンティティでも文脈が線形に膨れない**ことが、ここで効いた。
 - **本当の上限は wall-clock 遅延と盤面サイズ**: トップ10 は **2.9分**（30 tool calls・§7② の死に時間がついに効く）＋ **spec 127KB・208要素**（情報過多で human が読み切れない盤面）。つまり「濃すぎ」境界は **文脈/firewall の問題でなく、レイテンシと認知負荷（UX）の問題**に移る。
 - **設計含意**: 線幅は「トークン予算」でなく「許せる待ち時間と1画面の情報量」で決める。既定 `ADDRESSABLE_TOP_N=5` は「多くの比較を賄い・数十秒で返り・1画面で読める」スイートスポット。10 は技術的に組めるが体感（待ち＋過多）で割に合わない。
+
+---
+
+## 12. 再フェッチ税の除去 — 越境 scalar-ref（§10 のトレードを解消）（2026-06-25 ライブ・Azure OpenAI）
+
+§10 で「$state を持ち越さないので参照フォローアップでも quakes→quakeDetail を撃ち直す（再フェッチ税）」と記録した。§8(a) と同じ「線を広げる」判断を**ターン境界**に適用＝前ターンの **スカラーだけ**（eventId/place/mag/lat/lon）を次ターンに渡す。
+
+### 実装
+- クライアントは履歴で直近 assistant の data-initialState を送り返す（生 slice 込み）。サーバの `priorEntities` がそこから **スカラーフィールドだけ**抜く（nodalPlanes/articles/hourly/quakes[] は読まない）＝**LLM 文脈に生配列を一切入れない＝firewall はターン境界でも維持**（生データは wire を client→server で渡るが元々サーバ産・LLM には載らない）。
+- prompt に「前ターンで判明した震源（再取得不要・lat/lon を weather/nearby にそのまま使える）」として注入。AGENT_SYSTEM に「同じ震源は撃ち直さない／新しい震源だけ quakes から」。
+
+### 観察（ライブ・同じ turn1→turn2・curl で履歴を client と同形に再現）
+turn1「いちばん大きい地震を詳しく」（Yumare M7.5・eventId/lat/lon が $state に）→ turn2「その震源の周りには？」:
+
+| | §10（持ち越しなし） | §12（scalar-ref 持ち越し） |
+|---|---|---|
+| 手数 | 6手（quakes→quakeDetail→nearby×2→weather→done） | **2手**（nearby→done） |
+| totalIn | 10.8k | **3.0k** |
+| wall-clock | ~62s | **12.4s** |
+| 取得 | quakes+quakeDetail を撃ち直し | **直接 nearby**（carried lat/lon を使用・再取得ゼロ） |
+
+### 地図エントリ
+- **§8(a) と同型のトレードがターン境界にもある**: 越境の線を「スカラーだけ」広げると、参照フォローアップが **約5倍速く・約3.5倍安く**（再フェッチ税の消滅）。$state（盤面の生データ）は依然ターンごとに新規＝越境するのは locating scalar だけ。
+- **firewall は保ったまま**: 越境するのは scalar-ref のみ（生配列は `priorEntities` が読まない）。**ループ内・spec 経路・ターン境界の全てで同じ規律＝「スカラーは通す・生配列は通さない」**が一貫して効く＝この実験を貫く1本の軸。
+- トレード（残）: 越境スカラーを所与にするぶん鮮度リスク（地震の lat/lon は不変だが weather は動く）→ lat/lon だけ carry し weather は毎回取り直す設計が妥当（実装もそうなっている）。
