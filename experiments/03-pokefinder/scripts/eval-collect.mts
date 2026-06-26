@@ -95,6 +95,11 @@ async function run(query: string) {
     return m?.[1];
   });
   const findButton = els.some(([, e]) => e?.type === "ActionButton" && e?.on?.click?.action === "find");
+  // 説明 Text（非表現語の graceful 明示はここに出る）。$template/オブジェクトは除外し素の文字列だけ拾う。
+  // ※ これを捕捉しないと判定が「告知付き縮約」と「無告知サイレント縮約」を切り分けられない（v1/v2 評定の盲点）。
+  const notes = els
+    .filter(([, e]) => e?.type === "Text" && typeof e?.props?.text === "string")
+    .map(([, e]) => e.props.text as string);
   return {
     query,
     elementCount: els.length,
@@ -104,6 +109,7 @@ async function run(query: string) {
     findButton,
     offCatalog,
     badPaths,
+    notes,
     state: (spec.state as any)?.shelf ?? null,
   };
 }
