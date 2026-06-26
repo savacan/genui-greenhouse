@@ -78,7 +78,7 @@ export function MonGrid({ mons }: { mons: MonGridRow[] }) {
                 <div key={s.key} className="pf-statrow">
                   <span className="pf-statrow__label">{s.label}</span>
                   <span className="pf-statrow__bar">
-                    <span className="pf-statrow__fill" style={{ width: `${Math.min(100, (v / 200) * 100)}%` }} />
+                    <span className="pf-statrow__fill" style={{ width: `${Math.min(100, (v / 255) * 100)}%` }} />
                   </span>
                   <span className="pf-statrow__val">{v}</span>
                 </div>

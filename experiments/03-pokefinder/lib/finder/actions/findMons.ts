@@ -33,8 +33,14 @@ const params = z.object({
       speed: z.number().optional(),
     })
     .optional(),
-  /** 並べ替え軸（desc）。既定 total。 */
+  /** 並べ替え軸（desc）。既定 total。問いで「素早さ高め」等の強調があれば該当軸を渡す。 */
   sortBy: z.enum(["total", ...STAT_KEYS]).optional(),
+  /**
+   * 別形態（メガ/キョダイ/primal/origin/ultra/-eternamax/地方フォーム等）を含めるか。
+   * 既定 false = is_default の base 種だけ（type/<t> はフォーム名を全部含むので、これを切らないと
+   * 種族値最大の異形＝eternatus-eternamax(1125) 等がボードを占有する＝「相棒探し」の体験が壊れる）。
+   */
+  includeForms: z.boolean().optional(),
   /** 結果ボードに載せる最大件数（表示の上限・既定 24）。 */
   limit: z.number().int().min(1).max(60).optional(),
 });
@@ -60,6 +66,8 @@ interface GenerationRaw {
 interface PokemonRaw {
   id: number;
   name: string;
+  is_default: boolean; // 既定形態か（true=base 種・false=メガ/キョダイ等の別形態）
+  species: { name: string }; // base 種名（世代フィルタはフォーム名でなくこれで突き合わせる）
   sprites: { front_default: string | null };
   types: Array<{ type: { name: string } }>;
   stats: Array<{ base_stat: number; stat: { name: string } }>;
@@ -67,10 +75,10 @@ interface PokemonRaw {
 
 interface FindRaw {
   monsRaw: PokemonRaw[];
-  typeCounts: Record<string, number>; // タイプごとの母集団サイズ（積集合前）
-  matchedCount: number; // 積集合（＋世代）後の候補総数
-  truncated: boolean; // MAX_DETAIL で切ったか
-  droppedCount: number; // 切り捨てた候補数
+  typeCounts: Record<string, number>; // タイプごとの母集団サイズ（フォーム名込み・結合前）
+  matchedCount: number; // タイプ結合＋形態フィルタ＋世代フィルタ後の候補総数
+  truncated: boolean; // MAX_DETAIL 安全弁で切ったか（現実クエリでは非発生）
+  droppedCount: number; // 安全弁で切り捨てた候補数
 }
 
 export interface MonRow {
@@ -102,34 +110,41 @@ export interface FindState extends Record<string, unknown> {
     genTo: number | null;
     minStats: Partial<Record<StatKey, number>>;
     sortBy: string;
+    includeForms: boolean;
   };
   topName: string | null;
 }
 
-function idFromUrl(url: string): number {
-  const m = /\/(\d+)\/?$/.exec(url);
-  return m ? Number(m[1]) : 0;
-}
+const SORT_LABEL: Record<string, string> = {
+  total: "総合力", hp: "HP", attack: "こうげき", defense: "ぼうぎょ", spAtk: "とくこう", spDef: "とくぼう", speed: "すばやさ",
+};
 
-/** 結果ボード用の日本語 criteria ラベル（typeMode の OR/AND・世代範囲を反映）。route 2箇所で共用。 */
+/** 結果ボード用の日本語 criteria ラベル（typeMode の OR/AND・世代範囲・並べ替え・形態を反映）。route 2箇所で共用。 */
 export function criteriaLabelJa(c: FindState["criteria"]): string {
   const typeLabel =
     c.typeMode === "or"
       ? `${c.types.join("か")}（どれか）`
       : `${c.types.join("・")}${c.types.length > 1 ? "（すべて）" : ""}`;
-  const gen =
-    c.genFrom != null || c.genTo != null
-      ? c.genFrom != null && c.genFrom === c.genTo
-        ? ` / 第${c.genFrom}世代`
-        : ` / 第${c.genFrom ?? 1}〜${c.genTo ?? 9}世代`
-      : "";
+  // 世代ラベルは fetch と同じく min/max 正規化し、片端 null は「以降/まで」で開放を表す。
+  const gen = (() => {
+    const { genFrom, genTo } = c;
+    if (genFrom == null && genTo == null) return "";
+    if (genFrom != null && genTo != null) {
+      const lo = Math.min(genFrom, genTo), hi = Math.max(genFrom, genTo);
+      return lo === hi ? ` / 第${lo}世代` : ` / 第${lo}〜${hi}世代`;
+    }
+    if (genFrom != null) return ` / 第${genFrom}世代以降`;
+    return ` / 第${genTo}世代まで`;
+  })();
   const stats = Object.keys(c.minStats).length ? ` / 下限 ${JSON.stringify(c.minStats)}` : "";
-  return typeLabel + gen + stats;
+  const sort = c.sortBy && c.sortBy !== "total" ? ` / ${SORT_LABEL[c.sortBy] ?? c.sortBy}順` : "";
+  const forms = c.includeForms ? " / 別形態込み" : "";
+  return typeLabel + gen + stats + sort + forms;
 }
 
 export const findMons: Action<Params, FindRaw, FindState> = {
   id: "findMons",
-  when: "選んだタイプ(typeMode=and 積集合 / or 和集合)・世代範囲(genFrom..genTo)・種族値しきい値に合うポケモンをサーバ計算して返す。『探す』で呼ぶ。",
+  when: "選んだタイプ(typeMode=and 積集合 / or 和集合)・世代範囲(genFrom..genTo)・種族値しきい値・並べ替え(sortBy)・形態(includeForms 既定 false=base 種のみ)でポケモンをサーバ計算して返す。『探す』で呼ぶ。",
   params,
 
   // ★ fetch = I/O ＋ 積集合の計画（どの pokemon を取りに行くかを決める）。種族値の純計算は compute。
@@ -158,9 +173,11 @@ export const findMons: Action<Params, FindRaw, FindState> = {
       for (let i = 1; i < nameSets.length; i++) cand = cand.filter((n) => nameSets[i].has(n));
     }
 
-    // 2) 世代範囲で積集合（genFrom..genTo の species name 和集合と突き合わせ）。両 null=全世代でスキップ。
+    // 2) 世代範囲の species 集合を用意（突き合わせは fetch 後に species.name で行う＝フォーム名と種名の
+    //    粒度差バグを回避。type/<t> はフォーム名・generation は種名なので、生文字列の交差は giratina 等を誤って落とす）。
     const genFrom = p.genFrom ?? null;
     const genTo = p.genTo ?? null;
+    let genSpecies: Set<string> | null = null;
     if (genFrom != null || genTo != null) {
       const lo = Math.min(genFrom ?? 1, genTo ?? 9);
       const hi = Math.max(genFrom ?? 1, genTo ?? 9);
@@ -169,23 +186,28 @@ export const findMons: Action<Params, FindRaw, FindState> = {
       const genLists = await Promise.all(
         gens.map((g) => fetchJson<GenerationRaw>(`${base}/generation/${g}`, ctx.signal)),
       );
-      const species = new Set<string>();
-      for (const gl of genLists) for (const s of gl.pokemon_species) species.add(s.name);
-      cand = cand.filter((n) => species.has(n));
+      genSpecies = new Set<string>();
+      for (const gl of genLists) for (const s of gl.pokemon_species) genSpecies.add(s.name);
     }
-    cand.sort(); // 決定的に
+    cand.sort(); // 決定的に（安全弁で切るときの再現性）
 
-    // 3) 全候補の種族値を取りに行く（ランキングを正確にするため・安全弁 MAX_DETAIL でのみ切る）。
-    const matchedCount = cand.length;
+    // 3) 安全弁（現実クエリ最大 ~498 < 600 なので通常 truncated=false）。
     const capped = cand.slice(0, MAX_DETAIL);
     const truncated = cand.length > MAX_DETAIL;
 
-    // 4) 候補の種族値・スプライト・タイプを並列取得（生 payload を返すだけ。整形は compute）。
-    const monsRaw = await mapLimit(capped, DETAIL_CONCURRENCY, (name) =>
+    // 4) 全候補の詳細を並列取得（is_default/species 含む。ランキングは全件評価してから上位を出す）。
+    let monsRaw = await mapLimit(capped, DETAIL_CONCURRENCY, (name) =>
       fetchJson<PokemonRaw>(`${base}/pokemon/${name}`, ctx.signal),
     );
 
-    return { monsRaw, typeCounts, matchedCount, truncated, droppedCount: matchedCount - capped.length };
+    // 5) 形態フィルタ: 既定は is_default の base 種だけ（メガ/キョダイ/eternamax 等の異形を除外）。includeForms で全形態。
+    if (!p.includeForms) monsRaw = monsRaw.filter((m) => m.is_default);
+    // 6) 世代フィルタ: フォーム名でなく species.name で突き合わせる（giratina-altered→giratina 等が正しく残る）。
+    if (genSpecies) monsRaw = monsRaw.filter((m) => genSpecies!.has(m.species.name));
+
+    // 条件（タイプ結合＋形態＋世代）に合った総数。
+    const matchedCount = monsRaw.length;
+    return { monsRaw, typeCounts, matchedCount, truncated, droppedCount: cand.length - capped.length };
   },
 
   // ★ PURE: 種族値の合計・しきい値フィルタ・並べ替え・行整形（全部ここ。spec には値だけ載る）。
@@ -235,6 +257,7 @@ export const findMons: Action<Params, FindRaw, FindState> = {
         genTo: p.genTo ?? null,
         minStats,
         sortBy,
+        includeForms: p.includeForms ?? false,
       },
       topName: mons[0]?.name ?? null,
     };

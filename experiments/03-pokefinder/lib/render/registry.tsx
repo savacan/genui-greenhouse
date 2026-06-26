@@ -111,6 +111,17 @@ export const { registry } = defineRegistry(catalog, {
       );
     },
 
+    // 単独 ON/OFF トグル（別形態を含めるか等）。checked を $bindState で state に two-way 結合。
+    Toggle: ({ props, bindings }) => {
+      const [checked, setChecked] = useBoundProp<boolean>(props.checked, bindings?.checked);
+      return (
+        <label className={`pf-toggle${checked ? " pf-toggle--on" : ""}`}>
+          <input type="checkbox" checked={checked ?? false} onChange={(e) => setChecked(e.target.checked)} />
+          <span className="pf-toggle__label">{props.label}</span>
+        </label>
+      );
+    },
+
     // emit("click") → Renderer が element.on.click を解決し provider の "find" ハンドラを呼ぶ。
     ActionButton: ({ props, emit }) => (
       <button type="button" className={`pf-actionbtn pf-actionbtn--${props.tone}`} onClick={() => emit("click")}>

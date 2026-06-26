@@ -8,27 +8,18 @@ import { pipeJsonRender } from "@json-render/core";
 import { getModel } from "@/lib/finder/model";
 import { catalog } from "@/lib/render/catalog";
 import { pokeTypes } from "@/lib/finder/actions/pokeTypes";
-import { findMons, criteriaLabelJa } from "@/lib/finder/actions/findMons";
-import { buildFormPrompt, buildResultsPrompt, parseSeedMon } from "@/lib/finder/compose";
+import { buildFormPrompt, parseSeedMon } from "@/lib/finder/compose";
 import type { ActionContext, Stage } from "@/lib/finder/types";
 
 /**
- * exp03 = 単発 compose（01 写経・agentic loop なし）。2モード:
- *   intent="form" : 問い → 語彙(pokeTypes)を添えて LLM が two-way 入力フォーム spec を組む（spec.state に初期選択）。
- *   intent="find" : 現在の shelf → サーバが findMons を計算 → 値を data-initialState に flush → LLM が結果ボードを組む。
- * どちらも spec 経路は hard firewall（LLM は catalog 文法 + パス/件数だけ見る・生 mons は見ない）。
+ * exp03 = 単発 compose（01 写経・agentic loop なし）。フォーム生成のみ:
+ *   問い（or 結果カードの指差し seedMon）→ 語彙(pokeTypes)を添えて LLM が two-way 入力フォーム spec を組む。
+ * 「探す」は §12 で LLM を介さない `/api/find`（計算のみ）に分離済み（旧 intent="find" 経路は撤去）。
+ * spec 経路は hard firewall（LLM は catalog 文法 + パス/件数だけ見る・生 mons は見ない）。
  */
 export const maxDuration = 60;
 
 const COMPOSE_SYSTEM = catalog.prompt({ mode: "inline" });
-
-type FindParams = {
-  types?: string[];
-  typeMode?: "and" | "or";
-  genFrom?: number | null;
-  genTo?: number | null;
-  minStats?: Record<string, number>;
-};
 
 function lastUserText(messages: UIMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -45,7 +36,6 @@ function lastUserText(messages: UIMessage[]): string {
 
 export async function POST(req: Request) {
   const body = await req.json();
-  const intent: "form" | "find" = body.intent === "find" ? "find" : "form";
   const messages: UIMessage[] = body.messages ?? [];
   const model = getModel();
   const ctx: ActionContext = {
@@ -56,49 +46,6 @@ export async function POST(req: Request) {
   const stream = createUIMessageStream({
     execute: async ({ writer }) => {
       const stage = (s: Stage) => writer.write({ type: "data-stage", data: s });
-
-      if (intent === "find") {
-        // ---- 「探す」: 現在 shelf でサーバ計算 → 結果ボード ----
-        const raw = (body.shelf ?? {}) as FindParams;
-        const types = (raw.types ?? []).filter(Boolean);
-        if (!types.length) {
-          stage({ phase: "error", label: "タイプを1つ以上選んでください。" });
-          return;
-        }
-        const params = findMons.params.parse({
-          types,
-          typeMode: raw.typeMode === "or" ? "or" : "and",
-          genFrom: raw.genFrom ?? null,
-          genTo: raw.genTo ?? null,
-          minStats: raw.minStats ?? {},
-        });
-        const originalQuery = typeof body.query === "string" ? body.query : "ポケモンを探す";
-
-        stage({ phase: "fetching", label: "条件に合うポケモンを集計中…" });
-        let state;
-        try {
-          const fetched = await findMons.fetch(params, ctx);
-          state = findMons.compute(fetched, params);
-        } catch (e) {
-          stage({ phase: "error", label: `検索に失敗しました: ${String(e)}` });
-          return;
-        }
-        const hint = findMons.describe(state);
-
-        // 生 slice を initialState に flush（spec より先にシード）。
-        writer.write({ type: "data-initialState", data: { findMons: state } });
-
-        stage({ phase: "composing", label: hint.summary });
-        const criteriaLabel = criteriaLabelJa(state.criteria);
-        const result = streamText({
-          model,
-          abortSignal: req.signal,
-          system: COMPOSE_SYSTEM,
-          prompt: buildResultsPrompt(criteriaLabel, hint, originalQuery),
-        });
-        writer.merge(pipeJsonRender(result.toUIMessageStream()));
-        return;
-      }
 
       // ---- form: 問い（or 結果カードの指差し）→ 語彙を添えてフォーム spec を組む ----
       // §14: body.seedMon があれば「起点ポケモンに似た相棒」フォームを再 compose（出力ジェスチャ → 入力UI 合成）。

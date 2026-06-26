@@ -16,21 +16,32 @@ type FindBody = {
   genFrom?: number | null;
   genTo?: number | null;
   minStats?: Record<string, number>;
+  sortBy?: string;
+  includeForms?: boolean;
 };
+
+const STAT_OR_TOTAL = new Set(["total", "hp", "attack", "defense", "spAtk", "spDef", "speed"]);
 
 export async function POST(req: Request) {
   const body = (await req.json()) as FindBody;
-  const types = (body.types ?? []).filter(Boolean);
+  const types = (body.types ?? []).filter(Boolean).slice(0, 3);
   if (!types.length) {
     return Response.json({ error: "タイプを1つ以上選んでください。" }, { status: 400 });
   }
-  const params = findMons.params.parse({
-    types,
-    typeMode: body.typeMode === "or" ? "or" : "and",
-    genFrom: body.genFrom ?? null,
-    genTo: body.genTo ?? null,
-    minStats: body.minStats ?? {},
-  });
+  let params: ReturnType<typeof findMons.params.parse>;
+  try {
+    params = findMons.params.parse({
+      types,
+      typeMode: body.typeMode === "or" ? "or" : "and",
+      genFrom: body.genFrom ?? null,
+      genTo: body.genTo ?? null,
+      minStats: body.minStats ?? {},
+      sortBy: typeof body.sortBy === "string" && STAT_OR_TOTAL.has(body.sortBy) ? body.sortBy : undefined,
+      includeForms: body.includeForms === true,
+    });
+  } catch (e) {
+    return Response.json({ error: `パラメータが不正です: ${String(e)}` }, { status: 400 });
+  }
   const ctx: ActionContext = {
     signal: req.signal,
     env: { pokeBase: process.env.POKE_API_BASE ?? "https://pokeapi.co/api/v2" },

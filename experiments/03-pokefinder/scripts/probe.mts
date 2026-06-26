@@ -97,23 +97,30 @@ for (const c of cases) {
 
 // ⑫ ランキング正しさ assertion（件数でなく“答えが正しいか”を検証する＝§14b の教訓）。
 // 真の全件ランク（cap なしで fire 全部の total を出す）と findMons の上位を突き合わせ、取りこぼしを検出する。
+// findMons は既定で base 種のみ(is_default)なので、ground truth も is_default で揃える。includeForms 版も別途検証。
 {
   const STAT = ["hp", "attack", "defense", "special-attack", "special-defense", "speed"];
-  try {
+  const check = async (label: string, includeForms: boolean) => {
     const fireRaw = await fetchJson<{ pokemon: { pokemon: { name: string } }[] }>(`${pokeBase}/type/fire`, ctx().signal);
     const names = fireRaw.pokemon.map((e) => e.pokemon.name);
-    const totals = await mapLimit(names, 16, async (n) => {
-      const m = await fetchJson<{ stats: { base_stat: number; stat: { name: string } }[] }>(`${pokeBase}/pokemon/${n}`, ctx().signal);
-      return { n, t: m.stats.filter((s) => STAT.includes(s.stat.name)).reduce((a, s) => a + s.base_stat, 0) };
+    const rows = await mapLimit(names, 16, async (n) => {
+      const m = await fetchJson<{ is_default: boolean; stats: { base_stat: number; stat: { name: string } }[] }>(`${pokeBase}/pokemon/${n}`, ctx().signal);
+      return { n, isDefault: m.is_default, t: m.stats.filter((s) => STAT.includes(s.stat.name)).reduce((a, s) => a + s.base_stat, 0) };
     });
-    totals.sort((a, b) => b.t - a.t);
-    const trueTop5 = totals.slice(0, 5).map((x) => x.n);
-    const state = await findMons.compute(await findMons.fetch({ types: ["fire"], sortBy: "total" }, ctx()), { types: ["fire"], sortBy: "total" });
+    const pool = includeForms ? rows : rows.filter((r) => r.isDefault);
+    pool.sort((a, b) => b.t - a.t);
+    const trueTop5 = pool.slice(0, 5).map((x) => x.n);
+    const p = { types: ["fire"], sortBy: "total" as const, includeForms };
+    const state = await findMons.compute(await findMons.fetch(p, ctx()), p);
     const shown = new Set(state.mons.map((m) => m.name));
     const missed = trueTop5.filter((n) => !shown.has(n));
-    console.log(`===== ⑫ ランキング正しさ（fire 全${names.length}件の真のトップ5を findMons が取りこぼさないか）=====`);
-    console.log(`  真のトップ5: ${trueTop5.join(", ")}`);
-    console.log(`  取りこぼし : ${missed.length ? missed.join(", ") : "なし"}  → ${missed.length ? "FAIL（cap がランキングを壊している）" : "PASS"}`);
+    console.log(`  [${label}] 真のトップ5: ${trueTop5.join(", ")}`);
+    console.log(`  [${label}] 取りこぼし : ${missed.length ? missed.join(", ") : "なし"}  → ${missed.length ? "FAIL" : "PASS"}`);
+  };
+  try {
+    console.log(`===== ⑫ ランキング正しさ（fire の真のトップ5を findMons が取りこぼさないか）=====`);
+    await check("base のみ(既定)", false);
+    await check("別形態込み", true);
   } catch (e) {
     console.log("===== ⑫ ランキング正しさ FAILED =====\n", String(e), "\n");
   }

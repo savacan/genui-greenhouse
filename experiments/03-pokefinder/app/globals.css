@@ -77,6 +77,10 @@ body {
 .pf-slider__val { color: var(--accent-ink); font-weight: 800; }
 .pf-slider input[type="range"] { width: 100%; accent-color: var(--accent); }
 
+.pf-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 7px 13px; border: 1.5px solid var(--line); border-radius: 999px; cursor: pointer; user-select: none; font-size: 14px; font-weight: 600; background: #fff; }
+.pf-toggle input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+.pf-toggle--on { border-color: var(--accent); background: #fff0ec; }
+
 .pf-actionbtn {
   align-self: flex-start; padding: 11px 22px; border: none; border-radius: 11px;
   font-size: 15px; font-weight: 800; cursor: pointer;

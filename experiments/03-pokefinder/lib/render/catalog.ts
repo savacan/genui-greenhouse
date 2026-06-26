@@ -85,6 +85,16 @@ export const catalog = defineCatalog(schema, {
         "種族値の下限スライダー。value は two-way: " +
         '"value": { "$bindState": "/shelf/minStats/<stat>" }（stat = speed|attack|defense|hp|spAtk|spDef）。0=絞り込みなし。種族値は概ね 0〜200。問いで「素早さ高め」等が出たら該当軸を初期 state で 100 前後に。',
     },
+    Toggle: {
+      props: z.object({
+        label: z.string(),
+        checked: z.boolean().default(false),
+      }),
+      description:
+        "ON/OFF トグル（単独のチェックボックス）。checked は必ず two-way: " +
+        '"checked": { "$bindState": "/shelf/<path>" }。' +
+        '用途: 別形態（メガ/キョダイ等）を含めるトグル → checked を /shelf/includeForms に結ぶ（既定 false=基本形態のみ）。',
+    },
     ActionButton: {
       props: z.object({
         label: z.string(),

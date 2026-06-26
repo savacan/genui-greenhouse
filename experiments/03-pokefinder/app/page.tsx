@@ -28,9 +28,11 @@ type AnyPart = { type: string; data?: unknown };
 type Shelf = {
   type?: Record<string, boolean>;
   typeMode?: "and" | "or";
-  genFrom?: number | null;
-  genTo?: number | null;
+  genFrom?: number | string | null;
+  genTo?: number | string | null;
   minStats?: Record<string, number>;
+  sortBy?: string;
+  includeForms?: boolean;
 };
 
 function lastStage(parts: AnyPart[]): Stage | undefined {
@@ -40,16 +42,25 @@ function lastStage(parts: AnyPart[]): Stage | undefined {
   return undefined;
 }
 
-/** store の現在 shelf → findMons 引数（false / 0 は落とす）。§14b: typeMode(and/or)・世代範囲 genFrom/genTo も渡す。 */
+/** Select の value は稀に文字列で来る（LLM が "5" を出す等）。number|null に正規化。 */
+function toGen(v: number | string | null | undefined): number | null {
+  if (v == null || v === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** store の現在 shelf → findMons 引数（false / 0 は落とす）。§14b: typeMode・世代範囲・sortBy・includeForms も渡す。 */
 function toFindParams(shelf: Shelf | undefined) {
-  const types = Object.entries(shelf?.type ?? {}).filter(([, v]) => v).map(([k]) => k);
+  const types = Object.entries(shelf?.type ?? {}).filter(([, v]) => v).map(([k]) => k).slice(0, 3);
   const minStats = Object.fromEntries(Object.entries(shelf?.minStats ?? {}).filter(([, v]) => typeof v === "number" && v > 0));
   return {
     types,
     typeMode: shelf?.typeMode === "or" ? "or" : "and",
-    genFrom: shelf?.genFrom ?? null,
-    genTo: shelf?.genTo ?? null,
+    genFrom: toGen(shelf?.genFrom),
+    genTo: toGen(shelf?.genTo),
     minStats,
+    sortBy: typeof shelf?.sortBy === "string" ? shelf.sortBy : undefined,
+    includeForms: shelf?.includeForms === true,
   };
 }
 
