@@ -1,4 +1,4 @@
-import { findMons } from "@/lib/finder/actions/findMons";
+import { findMons, criteriaLabelJa } from "@/lib/finder/actions/findMons";
 import type { ActionContext } from "@/lib/finder/types";
 
 /**
@@ -9,7 +9,13 @@ import type { ActionContext } from "@/lib/finder/types";
  */
 export const maxDuration = 30;
 
-type FindBody = { types?: string[]; generationId?: number | null; minStats?: Record<string, number> };
+type FindBody = {
+  types?: string[];
+  typeMode?: "and" | "or";
+  genFrom?: number | null;
+  genTo?: number | null;
+  minStats?: Record<string, number>;
+};
 
 export async function POST(req: Request) {
   const body = (await req.json()) as FindBody;
@@ -19,7 +25,9 @@ export async function POST(req: Request) {
   }
   const params = findMons.params.parse({
     types,
-    generationId: body.generationId ?? null,
+    typeMode: body.typeMode === "or" ? "or" : "and",
+    genFrom: body.genFrom ?? null,
+    genTo: body.genTo ?? null,
     minStats: body.minStats ?? {},
   });
   const ctx: ActionContext = {
@@ -29,11 +37,7 @@ export async function POST(req: Request) {
   try {
     const fetched = await findMons.fetch(params, ctx);
     const state = findMons.compute(fetched, params);
-    const c = state.criteria;
-    const criteriaLabel =
-      c.types.join("∩") +
-      (c.generationId ? ` ∩ 第${c.generationId}世代` : "") +
-      (Object.keys(c.minStats).length ? ` / 下限 ${JSON.stringify(c.minStats)}` : "");
+    const criteriaLabel = criteriaLabelJa(state.criteria);
     // MonGrid / Kpi が読む形（値のみ・spec には算術なし）。
     return Response.json({
       mons: state.mons,

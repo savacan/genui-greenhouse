@@ -31,7 +31,7 @@ export const catalog = defineCatalog(schema, {
     },
     Text: {
       props: z.object({ text: z.string(), muted: z.boolean().default(false) }),
-      description: "本文テキスト。muted=true で控えめ。説明文や空状態に。$template で state を文字列に差し込める（例 \"{$template:'選択中: ${/shelf/generationId}'}\"）。",
+      description: "本文テキスト。muted=true で控えめ。説明文や空状態・注意書きに。$template で state を文字列に差し込める（例 \"{$template:'条件: ${/findMons/criteriaLabel}'}\"）／$state で値をそのまま（例 注意文を \"{$state:'/findMons/note'}\"）。",
     },
     Badge: {
       props: z.object({
@@ -59,7 +59,7 @@ export const catalog = defineCatalog(schema, {
       description:
         "1タイプのトグル（チェックボックス）。checked は必ず two-way バインド: " +
         '"checked": { "$bindState": "/shelf/type/<englishName>" }（<englishName> は pokeTypes の name、例 fire/flying）。' +
-        "label に日本語名、color にタイプ色。複数置くと AND 条件のセットになる。問いに合うタイプは初期 state で true にする。",
+        "label に日本語名、color にタイプ色。複数 ON のときの結合は /shelf/typeMode の Select（and=すべて持つ / or=どれか持つ）で決まる。問いに合うタイプは初期 state で true にする。",
     },
     Select: {
       props: z.object({
@@ -68,8 +68,9 @@ export const catalog = defineCatalog(schema, {
         value: z.union([z.number(), z.string()]).nullable(),
       }),
       description:
-        "単一選択ドロップダウン（世代の絞り込み）。value は two-way: " +
-        '"value": { "$bindState": "/shelf/generationId" }。options は [{value:null,label:"全世代"}, {value:1,label:"第1世代…"}, …]（value=数値 id、null=全世代）。',
+        "単一選択ドロップダウン。value は two-way バインド。用途は2つ: " +
+        '(a) タイプ条件 AND/OR: "value":{"$bindState":"/shelf/typeMode"}、options=[{value:"and",label:"すべてのタイプを持つ (AND)"},{value:"or",label:"どれかのタイプを持つ (OR)"}]。' +
+        '(b) 世代範囲の下端/上端: "value":{"$bindState":"/shelf/genFrom"} と "/shelf/genTo"、options=[{value:null,label:"指定なし"},{value:1,label:"第1世代…"},…]（value=数値 id、null=端を開く）。',
     },
     Slider: {
       props: z.object({

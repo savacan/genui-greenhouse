@@ -119,7 +119,7 @@ export const pokeTypes: Action<Params, TypesRaw, TypesState> = {
         {
           path: "/pokeTypes/generations",
           type: "array<{id(number),ja}>",
-          note: "世代の単一選択。$bindState '/shelf/generationId'(number|null) のセレクトに。null=全世代。",
+          note: "世代の選択肢。§14b は世代範囲＝$bindState '/shelf/genFrom' と '/shelf/genTo'(number|null) の2セレクトに使う。null=端を開く（両 null で全世代・genFrom のみで「N世代以降」）。",
           sample: `len=${s.generations.length}, ids=${s.generations.map((g) => g.id).join(",")}`,
         },
       ],

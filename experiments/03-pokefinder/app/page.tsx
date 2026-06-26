@@ -25,7 +25,13 @@ const EXAMPLES = [
 ];
 
 type AnyPart = { type: string; data?: unknown };
-type Shelf = { type?: Record<string, boolean>; generationId?: number | null; minStats?: Record<string, number> };
+type Shelf = {
+  type?: Record<string, boolean>;
+  typeMode?: "and" | "or";
+  genFrom?: number | null;
+  genTo?: number | null;
+  minStats?: Record<string, number>;
+};
 
 function lastStage(parts: AnyPart[]): Stage | undefined {
   for (let i = parts.length - 1; i >= 0; i--) {
@@ -34,11 +40,17 @@ function lastStage(parts: AnyPart[]): Stage | undefined {
   return undefined;
 }
 
-/** store の現在 shelf → findMons 引数（false / 0 は落とす）。 */
+/** store の現在 shelf → findMons 引数（false / 0 は落とす）。§14b: typeMode(and/or)・世代範囲 genFrom/genTo も渡す。 */
 function toFindParams(shelf: Shelf | undefined) {
   const types = Object.entries(shelf?.type ?? {}).filter(([, v]) => v).map(([k]) => k);
   const minStats = Object.fromEntries(Object.entries(shelf?.minStats ?? {}).filter(([, v]) => typeof v === "number" && v > 0));
-  return { types, generationId: shelf?.generationId ?? null, minStats };
+  return {
+    types,
+    typeMode: shelf?.typeMode === "or" ? "or" : "and",
+    genFrom: shelf?.genFrom ?? null,
+    genTo: shelf?.genTo ?? null,
+    minStats,
+  };
 }
 
 export default function Page() {
@@ -86,7 +98,7 @@ export default function Page() {
     const shelf = (spec as Spec | null)?.state?.shelf as Record<string, unknown> | undefined;
     if (shelf || hasSpec) {
       store.set("/shelf", shelf ? structuredClone(shelf) : {});
-      store.set("/findMons", { mons: [], count: 0, criteriaLabel: "" });
+      store.set("/findMons", { mons: [], count: 0, matchedCount: 0, criteriaLabel: "", note: "" });
       seededRef.current = id;
       setFindError(null);
     }
@@ -120,7 +132,14 @@ export default function Page() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
-      store.set("/findMons", { mons: data.mons, count: data.count, criteriaLabel: data.criteriaLabel });
+      // §14b: matchedCount/note も書き戻す（OR で候補が cap を超えた等の開示を live パスに届ける＝dead-path 配線を解消）。
+      store.set("/findMons", {
+        mons: data.mons,
+        count: data.count,
+        matchedCount: data.matchedCount,
+        criteriaLabel: data.criteriaLabel,
+        note: data.note ?? "",
+      });
     } catch (e) {
       setFindError(String(e));
     } finally {

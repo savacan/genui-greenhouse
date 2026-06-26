@@ -6,6 +6,7 @@
  * 複数の問い形で fetch→compute→describe を回し、state / StateHint を目視確認する:
  *   ① 語彙（pokeTypes）   ② 単一の広いタイプ（cap 発火）   ③ 2タイプ積集合（小さい）
  *   ④ タイプ×世代          ⑤ 種族値しきい値＋並べ替え       ⑥ 該当0件（空状態）
+ * §14b: ⑦ OR 和集合（cap 発火）   ⑧/⑧' AND vs OR 比較   ⑨ 世代範囲「N以降」   ⑩ 世代範囲「N〜M」   ⑪ 単一世代を範囲で（④と一致）
  */
 import { readFileSync } from "node:fs";
 import type { ActionContext } from "../lib/finder/types";
@@ -69,9 +70,16 @@ try {
 const cases: Array<{ label: string; params: Parameters<typeof findMons.fetch>[0] }> = [
   { label: "② 単一の広いタイプ fire（cap 発火想定）", params: { types: ["fire"] } },
   { label: "③ 2タイプ積集合 fire ∩ flying（小さい）", params: { types: ["fire", "flying"] } },
-  { label: "④ タイプ×世代 water ∩ gen1", params: { types: ["water"], generationId: 1 } },
+  { label: "④ タイプ×世代 water ∩ gen1（genFrom=genTo=1）", params: { types: ["water"], genFrom: 1, genTo: 1 } },
   { label: "⑤ 種族値 fire / speed>=100 / sort=speed", params: { types: ["fire"], minStats: { speed: 100 }, sortBy: "speed" } },
   { label: "⑥ 該当0件 normal ∩ ghost（空状態）", params: { types: ["normal", "ghost"] } },
+  // §14b: OR(和集合)と世代範囲の忠実化を検証。
+  { label: "⑦ OR 和集合 fire ∪ flying（>∩ かつ単タイプも入る・cap 発火）", params: { types: ["fire", "flying"], typeMode: "or", sortBy: "total" } },
+  { label: "⑧ AND vs OR 比較 dragon ∩ flying", params: { types: ["dragon", "flying"], typeMode: "and" } },
+  { label: "⑧' AND vs OR 比較 dragon ∪ flying（似た＝どれか共有 を忠実化）", params: { types: ["dragon", "flying"], typeMode: "or" } },
+  { label: "⑨ 世代範囲 steel ∩ gen5–9（『第5世代以降』を忠実化）", params: { types: ["steel"], genFrom: 5, genTo: 9 } },
+  { label: "⑩ 世代範囲 water ∩ gen1–3（『第1〜3世代』）+ sort total", params: { types: ["water"], genFrom: 1, genTo: 3, sortBy: "total" } },
+  { label: "⑪ 単一世代を範囲で water ∩ gen1（genFrom=genTo=1・④と一致するはず）", params: { types: ["water"], genFrom: 1, genTo: 1 } },
 ];
 
 for (const c of cases) {

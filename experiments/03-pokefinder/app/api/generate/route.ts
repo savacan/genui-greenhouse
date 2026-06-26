@@ -8,7 +8,7 @@ import { pipeJsonRender } from "@json-render/core";
 import { getModel } from "@/lib/finder/model";
 import { catalog } from "@/lib/render/catalog";
 import { pokeTypes } from "@/lib/finder/actions/pokeTypes";
-import { findMons } from "@/lib/finder/actions/findMons";
+import { findMons, criteriaLabelJa } from "@/lib/finder/actions/findMons";
 import { buildFormPrompt, buildResultsPrompt, parseSeedMon } from "@/lib/finder/compose";
 import type { ActionContext, Stage } from "@/lib/finder/types";
 
@@ -22,7 +22,13 @@ export const maxDuration = 60;
 
 const COMPOSE_SYSTEM = catalog.prompt({ mode: "inline" });
 
-type FindParams = { types?: string[]; generationId?: number | null; minStats?: Record<string, number> };
+type FindParams = {
+  types?: string[];
+  typeMode?: "and" | "or";
+  genFrom?: number | null;
+  genTo?: number | null;
+  minStats?: Record<string, number>;
+};
 
 function lastUserText(messages: UIMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -61,7 +67,9 @@ export async function POST(req: Request) {
         }
         const params = findMons.params.parse({
           types,
-          generationId: raw.generationId ?? null,
+          typeMode: raw.typeMode === "or" ? "or" : "and",
+          genFrom: raw.genFrom ?? null,
+          genTo: raw.genTo ?? null,
           minStats: raw.minStats ?? {},
         });
         const originalQuery = typeof body.query === "string" ? body.query : "ポケモンを探す";
@@ -81,9 +89,7 @@ export async function POST(req: Request) {
         writer.write({ type: "data-initialState", data: { findMons: state } });
 
         stage({ phase: "composing", label: hint.summary });
-        const criteriaLabel = state.criteria.types.join("∩") +
-          (state.criteria.generationId ? ` ∩ 第${state.criteria.generationId}世代` : "") +
-          (Object.keys(state.criteria.minStats).length ? ` / 下限 ${JSON.stringify(state.criteria.minStats)}` : "");
+        const criteriaLabel = criteriaLabelJa(state.criteria);
         const result = streamText({
           model,
           abortSignal: req.signal,

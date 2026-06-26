@@ -81,7 +81,8 @@ async function run(query: string) {
   const badPaths = bindPaths.filter((p) => {
     const mType = /^\/shelf\/type\/(.+)$/.exec(p);
     if (mType) return !VALID_TYPES.has(mType[1]);
-    if (p === "/shelf/generationId") return false;
+    // §14b: 世代範囲 genFrom/genTo・タイプ結合 typeMode が正しい新パス（旧 generationId は廃止）。
+    if (p === "/shelf/typeMode" || p === "/shelf/genFrom" || p === "/shelf/genTo") return false;
     const mStat = /^\/shelf\/minStats\/(.+)$/.exec(p);
     if (mStat) return !VALID_STATS.has(mStat[1]);
     return true;

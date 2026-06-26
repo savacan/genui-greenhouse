@@ -15,10 +15,13 @@ const API_STAT_TO_KEY: Record<string, StatKey> = {
 };
 
 const params = z.object({
-  /** AND で積集合するタイプ（en name・1〜3 件）。 */
+  /** 結合するタイプ（en name・1〜3 件）。typeMode で AND(積集合)か OR(和集合)かを切り替える。 */
   types: z.array(z.string()).min(1).max(3),
-  /** 世代で絞る（1〜9・null=全世代）。 */
-  generationId: z.number().int().min(1).max(9).nullable().optional(),
+  /** §14b: タイプの結合 = and(全部持つ＝積集合) / or(どれか持つ＝和集合)。既定 and。OR で「炎か飛行」「似た＝どれかのタイプを共有」を忠実化。 */
+  typeMode: z.enum(["and", "or"]).optional(),
+  /** §14b: 世代範囲の下端/上端（1〜9・null=開いた端）。genFrom=genTo で単一・両 null で全世代・genFrom だけ指定で「N世代以降」。範囲を忠実化。 */
+  genFrom: z.number().int().min(1).max(9).nullable().optional(),
+  genTo: z.number().int().min(1).max(9).nullable().optional(),
   /** 種族値の下限（指定軸のみ AND で適用。例 { speed: 100 }）。全軸 optional。 */
   minStats: z
     .object({
@@ -84,7 +87,14 @@ export interface FindState extends Record<string, unknown> {
   truncated: boolean;
   droppedCount: number;
   typeCounts: Record<string, number>;
-  criteria: { types: string[]; generationId: number | null; minStats: Partial<Record<StatKey, number>>; sortBy: string };
+  criteria: {
+    types: string[];
+    typeMode: "and" | "or";
+    genFrom: number | null;
+    genTo: number | null;
+    minStats: Partial<Record<StatKey, number>>;
+    sortBy: string;
+  };
   topName: string | null;
 }
 
@@ -93,16 +103,33 @@ function idFromUrl(url: string): number {
   return m ? Number(m[1]) : 0;
 }
 
+/** 結果ボード用の日本語 criteria ラベル（typeMode の OR/AND・世代範囲を反映）。route 2箇所で共用。 */
+export function criteriaLabelJa(c: FindState["criteria"]): string {
+  const typeLabel =
+    c.typeMode === "or"
+      ? `${c.types.join("か")}（どれか）`
+      : `${c.types.join("・")}${c.types.length > 1 ? "（すべて）" : ""}`;
+  const gen =
+    c.genFrom != null || c.genTo != null
+      ? c.genFrom != null && c.genFrom === c.genTo
+        ? ` / 第${c.genFrom}世代`
+        : ` / 第${c.genFrom ?? 1}〜${c.genTo ?? 9}世代`
+      : "";
+  const stats = Object.keys(c.minStats).length ? ` / 下限 ${JSON.stringify(c.minStats)}` : "";
+  return typeLabel + gen + stats;
+}
+
 export const findMons: Action<Params, FindRaw, FindState> = {
   id: "findMons",
-  when: "選んだタイプ(AND)・世代・種族値しきい値に合うポケモンをサーバで積集合計算して返す。『探す』で呼ぶ。",
+  when: "選んだタイプ(typeMode=and 積集合 / or 和集合)・世代範囲(genFrom..genTo)・種族値しきい値に合うポケモンをサーバ計算して返す。『探す』で呼ぶ。",
   params,
 
   // ★ fetch = I/O ＋ 積集合の計画（どの pokemon を取りに行くかを決める）。種族値の純計算は compute。
   async fetch(p, ctx) {
     const base = ctx.env.pokeBase;
 
-    // 1) 各タイプの母集団を並列取得し、name 集合の AND 積集合を取る。
+    // 1) 各タイプの母集団を並列取得し、typeMode で AND(積集合) か OR(和集合) を取る。
+    const typeMode = p.typeMode ?? "and";
     const typeLists = await Promise.all(
       p.types.map((t) => fetchJson<TypeRaw>(`${base}/type/${t}`, ctx.signal)),
     );
@@ -112,13 +139,30 @@ export const findMons: Action<Params, FindRaw, FindState> = {
       typeCounts[p.types[i]] = names.size;
       return names;
     });
-    let cand = [...nameSets[0]];
-    for (let i = 1; i < nameSets.length; i++) cand = cand.filter((n) => nameSets[i].has(n));
+    let cand: string[];
+    if (typeMode === "or") {
+      // OR = 和集合（どれかのタイプを持つ）。候補は大きく膨らむ＝MAX_DETAIL の cap が効きやすい（線の幅↔射程/レイテンシ）。
+      const union = new Set<string>();
+      for (const s of nameSets) for (const n of s) union.add(n);
+      cand = [...union];
+    } else {
+      cand = [...nameSets[0]];
+      for (let i = 1; i < nameSets.length; i++) cand = cand.filter((n) => nameSets[i].has(n));
+    }
 
-    // 2) 世代で積集合（generation/<id> の species name と突き合わせ）。
-    if (p.generationId != null) {
-      const gen = await fetchJson<GenerationRaw>(`${base}/generation/${p.generationId}`, ctx.signal);
-      const species = new Set(gen.pokemon_species.map((s) => s.name));
+    // 2) 世代範囲で積集合（genFrom..genTo の species name 和集合と突き合わせ）。両 null=全世代でスキップ。
+    const genFrom = p.genFrom ?? null;
+    const genTo = p.genTo ?? null;
+    if (genFrom != null || genTo != null) {
+      const lo = Math.min(genFrom ?? 1, genTo ?? 9);
+      const hi = Math.max(genFrom ?? 1, genTo ?? 9);
+      const gens: number[] = [];
+      for (let g = lo; g <= hi; g++) gens.push(g);
+      const genLists = await Promise.all(
+        gens.map((g) => fetchJson<GenerationRaw>(`${base}/generation/${g}`, ctx.signal)),
+      );
+      const species = new Set<string>();
+      for (const gl of genLists) for (const s of gl.pokemon_species) species.add(s.name);
       cand = cand.filter((n) => species.has(n));
     }
     cand.sort(); // 決定的に
@@ -176,7 +220,14 @@ export const findMons: Action<Params, FindRaw, FindState> = {
       truncated: raw.truncated,
       droppedCount: raw.droppedCount,
       typeCounts: raw.typeCounts,
-      criteria: { types: p.types, generationId: p.generationId ?? null, minStats, sortBy },
+      criteria: {
+        types: p.types,
+        typeMode: p.typeMode ?? "and",
+        genFrom: p.genFrom ?? null,
+        genTo: p.genTo ?? null,
+        minStats,
+        sortBy,
+      },
       topName: mons[0]?.name ?? null,
     };
   },
@@ -188,14 +239,20 @@ export const findMons: Action<Params, FindRaw, FindState> = {
     }
     if (s.truncated) {
       notes.push(
-        `候補 ${s.matchedCount} 件のうち上位 ${MAX_DETAIL} 件のみ種族値取得（${s.droppedCount} 件は未評価）。2つ目のタイプか世代で絞ると正確。`,
+        `候補 ${s.matchedCount} 件のうち上位 ${MAX_DETAIL} 件のみ種族値取得（${s.droppedCount} 件は未評価）。` +
+          (s.criteria.typeMode === "or"
+            ? "OR(和集合)は候補が大きく cap で切れやすい＝全体の種族値ランキングを取りこぼし得る（線を広げた代償。AND/世代で絞ると正確）。"
+            : "2つ目のタイプか世代で絞ると正確。"),
       );
     }
     if (s.filteredOut > 0) notes.push(`種族値しきい値で ${s.filteredOut} 件除外。`);
     const cr = s.criteria;
+    const join = cr.typeMode === "or" ? "∪" : "∩";
+    const genLabel =
+      cr.genFrom != null || cr.genTo != null ? ` ∩ gen${cr.genFrom ?? 1}–${cr.genTo ?? 9}` : "";
     const crLabel =
-      `${cr.types.join("∩")}` +
-      (cr.generationId ? ` ∩ gen${cr.generationId}` : "") +
+      `${cr.types.join(join)}` +
+      genLabel +
       (Object.keys(cr.minStats).length ? ` / min ${JSON.stringify(cr.minStats)}` : "") +
       ` / sort ${cr.sortBy}`;
     return {
