@@ -1,9 +1,15 @@
 "use client";
 
+import { useContext } from "react";
+import { AnchorContext } from "../anchorContext";
+
 /**
  * 結果ボードのスプライトカード・グリッド（出力部品）。02 の QuakeList と同型 = 部品が配列の反復を持つ
  * （json-render の repeat を spec に書かせず、/findMons/mons をそのままバインド）。
  * 種族値は 0-255 のバー、タイプは色付きバッジ。色は表示の関心なのでここで引く（サーバ map の2例目・許容）。
+ *
+ * §14: AnchorContext が居れば各カードに「これに似た相棒を」= 出力に乗せた入力アフォーダンスを出す。
+ * クリックでそのモンを上流へ渡し、page が seedMon 付きで「似た相棒」フォームを再 compose する。
  */
 
 const TYPE_COLORS: Record<string, string> = {
@@ -38,13 +44,14 @@ export interface MonGridRow {
 }
 
 export function MonGrid({ mons }: { mons: MonGridRow[] }) {
+  const onAnchor = useContext(AnchorContext);
   if (!mons?.length) {
     return <p className="pf-empty">該当ゼロ。条件をゆるめてみて。</p>;
   }
   return (
     <div className="pf-grid">
       {mons.map((m) => (
-        <article key={m.id} className="pf-card">
+        <article key={m.id} className={`pf-card${onAnchor ? " pf-card--anchorable" : ""}`}>
           <div className="pf-card__head">
             {m.sprite ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -78,6 +85,16 @@ export function MonGrid({ mons }: { mons: MonGridRow[] }) {
               );
             })}
           </div>
+          {onAnchor ? (
+            <button
+              type="button"
+              className="pf-anchorbtn"
+              onClick={() => onAnchor(m)}
+              title={`${m.name} を起点に似た相棒をさがす`}
+            >
+              ◎ これに似た相棒を
+            </button>
+          ) : null}
         </article>
       ))}
     </div>

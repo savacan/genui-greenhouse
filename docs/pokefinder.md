@@ -278,3 +278,20 @@ fire∩flying/speed≥100 の結果 4 件のうち 3 件が `charizard-mega-y`/`
 **より深い構造的発見**: OR と範囲は **現状のサーバでは原理的に表現不能**（type は AND 積集合のみ・世代は単一値）。プロンプト修正は LLM を「黙って誤エンコード」から「中立＋明示で graceful に劣化」へ移すが、意図を**忠実**にはできない（OR の片翼・範囲の下限は state から消える＝告知付きでも縮約は縮約）。**忠実な解決はサーバの表現力拡張**（`findMons` に type の OR／generation 範囲を足す）でしか得られない。＝ exp02 の「線の幅 ↔ 射程」と同型: ここでの「線」は **サーバのクエリ言語の表現力**で、プロンプト側の透明な劣化はその線が細いときの誠実なフォールバックにすぎない。
 
 > §13 の結論: 「非表現語を黙って近似する」破綻は **プロンプト規律（中立＋明示）で“透明な劣化”に格上げできる**（状態・明示とも実機で確認）。だが OR/範囲のような **真に表現不能な意図は、プロンプトでは graceful 止まりで、忠実化にはサーバの表現力拡張が要る**。そして閉ループの教訓＝**評価ハーネスは「修正が変える当の要素」を観測できる粒度で作らないと、自分の修正を採点できない**（収集が Text を落としていた盲点）。
+
+## 14. 指差しで組み直す — 出力ジェスチャ → 入力UI 再合成（実機＋多サンプル検証済み・2026-06-26）
+
+役割反転（§0）の**一段先**。これまで（§1–§13）は「テキストの問い → フォーム」の1方向だった。ここでは **結果ボード（出力部品 MonGrid）の各カードに入力アフォーダンス「◎ これに似た相棒を」を乗せ**、クリックされたモンを種（`seedMon`）に **LLM がフォームを再 compose** する＝**出力（描画）→ 入力UI（合成）の矢印**を、テキストでなく“指差し”という構造化ジェスチャで走らせる。
+
+**実装（既存レールに乗せただけ・新インフラなし）**: `MonGrid` → `AnchorContext`（React context, registry の外）→ `page.onAnchor`（安定 `useCallback([])`・可変値は `streamingRef`/`sendRef` 越し＝§10 の handler 凍結を踏まない）→ `sendMessage({text},{body:{seedMon}})` → `transport.prepareSendMessagesRequest` が body を merge → route が `parseSeedMon(body.seedMon)` を読み `buildFormPrompt(query,types,gens,seed)` の seed 分岐へ。`seedMon` は **client が結果行に既に持つ値（name/types/stats）をそのまま送る＝再フェッチしない**（exp02「越境スカラーで再フェッチ税を消す」の再利用）。controlled store（§12）は永続のまま、新 assistant message id で seeding effect が `spec.state.shelf` を再 seed・`/findMons` を空に。
+
+**なぜ registry の外（context）配線か（json-render 構造制約の再確認）**: MonGrid のカードは spec の element ではなく `/findMons/mons` の**動的データ行**。per-element の `on:{click,params:{monId}}` には monId を**静的に**書けない（どの行かは spec の時点で未定）。だから「どのモンを指したか」は React 側の context で扱う＝**動的データ行に入力を生やす唯一筋**。
+
+**検証した全ループ（:3103・実 Azure ＋ Playwright）**: ドラゴンで探す → 14件 → `dragonite`(dragon/flying) の「◎ これに似た相棒を」をクリック → 再 compose が `dragon:true / flying:false` ＋「OR=どちらか は表現できず AND のみ・意図反転回避のため中心1タイプで広めに」明示 ＋ こうげき下限（dragonite の A134→120）を seed・明示 → 結果は0にリセット → `ひこう` を ON（two-way）→「探す」→ `dragon∩flying` 6件が live 更新（**§10 の handler 凍結は再発せず**・§12 の保持を壊さず）。ユーザーは dragon(広い14) → dragon∩flying(AND・6) の**絞り込みを目で見られる**＝OR/AND の差が体感になる。
+
+**核の発見（正直版）**:
+- **新しいのは「役割」の向きと入力モダリティ**。出力カードに初めて入力を乗せ、**非テキスト（指差し）起点で LLM が入力UI を再合成できる**ことを通した。配線は §12 と同型＋ `onAnchor`→`sendMessage` の1経路を足しただけ＝**安く一段深い反転**が立つ。
+- **graceful OR は二次観察・かつ「LLM の自律判断」ではない**。型数を変えた4体（単タイプ `haxorus`／2タイプ `garchomp`・`charizard-mega-x`・`gyarados`）で全件 `orToAnd=false`（2タイプは毎回ちょうど1タイプだけ true・残り false＋必ず Text 明示）＝dragonite の1サンプル過剰一般化ではない。**だがこれは `seedSection` に「全 ON するな・中心1タイプだけ」とほぼ正解を口述した結果**＝§13 の graceful 規律（中立＋明示）が**構造化ジェスチャ起点でも崩れない**という**規律のロバスト性**であって、モデルが自分で気づいた証拠ではない。
+- **鏡像の破綻面（未検証・要注意）**: 「**似た＝OR**」は**サーバ作者の一方向の決め打ち**。複合一致（AND＝この2タイプを併せ持つ相棒）が本意のユーザーには、逆に「**AND→単一タイプ**」という**新たなサイレント縮約**を作り込みうる。指差しは意図が曖昧なぶん、どちらに倒しても誰かの意図を黙って削る。
+
+> §14 の結論: **出力ジェスチャ → 入力UI 再合成**は、§12 と同型の配線に `onAnchor`→`sendMessage` を1本足すだけで成立し、役割反転を一段深める（動的データ行への入力は context 配線が要る＝json-render 構造制約）。観察された OR→AND の graceful 回避は **§13 規律のロバスト性**であって LLM の自律判断ではない、と正直に置く。そして「似た＝OR」という**前提自体が一方向の縮約**で、忠実化は結局 §13 と同じ**サーバの表現力拡張（`findMons` の OR／世代範囲）＝線の幅↔射程**に帰着する。

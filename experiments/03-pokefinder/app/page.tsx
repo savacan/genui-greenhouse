@@ -6,6 +6,7 @@ import { DefaultChatTransport } from "ai";
 import { SPEC_DATA_PART_TYPE, createStateStore, type Spec } from "@json-render/core";
 import { useJsonRenderMessage } from "@json-render/react";
 import { FinderRenderer } from "@/lib/render/renderer";
+import type { MonGridRow } from "@/lib/render/components/MonGrid";
 import type { Stage } from "@/lib/finder/types";
 
 /**
@@ -54,12 +55,18 @@ export default function Page() {
   const transport = useMemo(
     () => new DefaultChatTransport({
       api: "/api/generate",
-      prepareSendMessagesRequest: ({ messages }) => ({ body: { messages, intent: "form" } }),
+      // §14: 指差し再 compose は sendMessage(..., { body: { seedMon } }) で seedMon を載せる → ここで merge。
+      // intent はスプレッド後に固定（per-call body が固定キーを上書きできない）。
+      prepareSendMessagesRequest: ({ messages, body }) => ({ body: { messages, ...(body ?? {}), intent: "form" } }),
     }),
     [],
   );
   const { messages, sendMessage, status, error } = useChat({ transport });
   const streaming = status === "submitted" || status === "streaming";
+  const streamingRef = useRef(false);
+  streamingRef.current = streaming;
+  const sendRef = useRef(sendMessage);
+  sendRef.current = sendMessage;
   const isLanding = messages.length === 0;
 
   const lastMsg = messages.at(-1);
@@ -121,6 +128,21 @@ export default function Page() {
     }
   }, [store]);
 
+  // §14「指差しで組み直す」: 結果カードのモンをクリック → そのモンを seedMon に、LLM が「似た相棒」フォームを再 compose。
+  // 安定参照（useCallback []）＋可変値は ref 越し（§10 の handler 凍結を踏まないため）。
+  // seedMon は client が既に持つ値をそのまま渡す（再フェッチしない＝exp02 越境スカラー）。
+  const onAnchor = useCallback((mon: MonGridRow) => {
+    if (streamingRef.current) return;
+    const seedMon = {
+      name: mon.name,
+      types: mon.types,
+      stats: { hp: mon.hp, attack: mon.attack, defense: mon.defense, spAtk: mon.spAtk, spDef: mon.spDef, speed: mon.speed },
+    };
+    setInput("");
+    setFindError(null);
+    void sendRef.current({ text: `「${mon.name}」を起点に、似た相棒をさがす` }, { body: { seedMon } });
+  }, []);
+
   return (
     <main className="pf-shell">
       <header className="pf-topbar">
@@ -158,7 +180,7 @@ export default function Page() {
         </div>
       ) : hasSpec && spec ? (
         <div className={searching ? "pf-searching" : undefined}>
-          <FinderRenderer key={lastAssistant?.id} spec={spec as Spec} store={store} loading={streaming} onFind={onFind} />
+          <FinderRenderer key={lastAssistant?.id} spec={spec as Spec} store={store} loading={streaming} onFind={onFind} onAnchor={onAnchor} />
           {searching ? <div className="pf-text pf-text--muted" style={{ marginTop: 8 }}>探索中…</div> : null}
         </div>
       ) : null}

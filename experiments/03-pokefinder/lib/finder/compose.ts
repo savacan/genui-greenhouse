@@ -10,13 +10,59 @@ import type { TypeVocab, GenVocab } from "./actions/pokeTypes";
  *    生 mons 配列は渡さず /findMons/mons パスだけ（01/02 と同じ data→prompt ファイアウォール）。
  */
 
-export function buildFormPrompt(query: string, types: TypeVocab[], generations: GenVocab[]): string {
+/** §14 起点ポケモン（結果カードを指差して再 compose する種）。client が持っている値をそのまま渡す（再フェッチしない）。 */
+export type SeedMon = {
+  name: string;
+  types: string[];
+  stats: { hp: number; attack: number; defense: number; spAtk: number; spDef: number; speed: number };
+};
+
+/**
+ * route は信頼できない body を受ける境界。seedMon を厳格に検証＆正規化する（不正なら null → 通常フォームへフォールバック）。
+ * stats は欠落しても 0 で埋めるので seedSection の参照が TypeError にならない（不正 seed の無言クラッシュを防ぐ）。
+ */
+export function parseSeedMon(raw: unknown): SeedMon | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.name !== "string" || !r.name) return null;
+  const types = Array.isArray(r.types) ? r.types.filter((t): t is string => typeof t === "string") : [];
+  if (!types.length) return null;
+  const s = (r.stats && typeof r.stats === "object" ? r.stats : {}) as Record<string, unknown>;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  return {
+    name: r.name,
+    types,
+    stats: { hp: num(s.hp), attack: num(s.attack), defense: num(s.defense), spAtk: num(s.spAtk), spDef: num(s.spDef), speed: num(s.speed) },
+  };
+}
+
+/** seedMon があるとき、フォーム冒頭に置く「似た＝OR の罠」セクション（§13 と同型の graceful 規律を指差し起点でも適用）。 */
+function seedSection(seed: SeedMon, types: TypeVocab[]): string {
+  const jaOf = (n: string) => types.find((t) => t.name === n)?.ja ?? n;
+  const tList = seed.types.map((t) => `${jaOf(t)}(${t})`).join("・");
+  const s = seed.stats;
+  const statStr = `HP${s.hp} / こうげき${s.attack} / ぼうぎょ${s.defense} / とくこう${s.spAtk} / とくぼう${s.spDef} / すばやさ${s.speed}`;
+  return [
+    `★ 起点ポケモン（ユーザーが結果カードをクリックして“指差した”・テキストでない入力）: ${seed.name}`,
+    `   タイプ: ${tList} / 種族値: ${statStr}`,
+    `この起点を足がかりに『${seed.name} に似た相棒』を探すフォームを組む。ユーザーは結果から1匹を指して「これに似たのを」と求めている。`,
+    `★ 「似た」＝OR の罠（最重要・サイレント縮約の禁止）: 「似た」は多くの場合「いずれかのタイプを共有する」= OR の含意。だがサーバはタイプの AND 積集合しか表現できない。${seed.name} の${seed.types.length}タイプを全部 ON(true) にすると「その複合タイプを完全に併せ持つモンだけ」に絞られ、「似た（どれかを共有）」が「全部を持つ」に意図反転する（= 既知の最大破綻 OR→AND）。`,
+    seed.types.length >= 2
+      ? `   → 全タイプを ON にしない。最も中心的な1タイプだけ初期 ON、残りタイプは TypeCheckbox として提示するが false。Text(muted) で「${seed.name} は ${tList} の複合タイプ。両方を ON にすると『すべて併せ持つ』複合一致に絞られるため、今は◯◯（中心の1タイプ）で広めに探しています（他のタイプも選べます）」と明示。`
+      : `   → 単タイプなのでそのタイプを初期 ON にしてよい。`,
+    `   種族値: ${seed.name} の目立つ軸（特に高い stat）があれば、その Slider を ${seed.name} の値より少し低い下限で初期 ON にしてよい（任意・やり過ぎない）。`,
+    ``,
+  ].join("\n");
+}
+
+export function buildFormPrompt(query: string, types: TypeVocab[], generations: GenVocab[], seed?: SeedMon | null): string {
   const typeLines = types.map((t) => `    ${t.name} = ${t.ja} (color ${t.color})`).join("\n");
   const genLines = generations.map((g) => `    ${g.id} = ${g.ja}`).join("\n");
   return [
     `ユーザーの問い: "${query}"`,
     `この問いに答えるための「ポケモン相棒ファインダー」の入力フォームを組む。ユーザーがこのフォームを操作して条件を決め、最後に「探す」を押すとサーバが検索する。`,
     ``,
+    ...(seed ? [seedSection(seed, types)] : []),
     `使う部品と two-way バインドの規律（必ず守る）:`,
     `- タイプ: TypeCheckbox を必要なだけ並べる。各 checked は { "$bindState": "/shelf/type/<englishName>" }（<englishName> は下の語彙の name）。label に日本語名、color に下の色。複数 ON は AND 条件。`,
     `- 世代: Select 1つ。value は { "$bindState": "/shelf/generationId" }。options は [{"value":null,"label":"全世代"}, …下の世代] を value=数値 id で。`,

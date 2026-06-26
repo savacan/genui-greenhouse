@@ -9,7 +9,7 @@ import { getModel } from "@/lib/finder/model";
 import { catalog } from "@/lib/render/catalog";
 import { pokeTypes } from "@/lib/finder/actions/pokeTypes";
 import { findMons } from "@/lib/finder/actions/findMons";
-import { buildFormPrompt, buildResultsPrompt } from "@/lib/finder/compose";
+import { buildFormPrompt, buildResultsPrompt, parseSeedMon } from "@/lib/finder/compose";
 import type { ActionContext, Stage } from "@/lib/finder/types";
 
 /**
@@ -94,8 +94,12 @@ export async function POST(req: Request) {
         return;
       }
 
-      // ---- form: 問い → 語彙を添えてフォーム spec を組む ----
-      const query = lastUserText(messages) || "相棒のポケモンをさがす";
+      // ---- form: 問い（or 結果カードの指差し）→ 語彙を添えてフォーム spec を組む ----
+      // §14: body.seedMon があれば「起点ポケモンに似た相棒」フォームを再 compose（出力ジェスチャ → 入力UI 合成）。
+      // 不正な seedMon は parseSeedMon が null に倒す → 通常フォームへフォールバック（無言クラッシュ回避）。
+      const seed = parseSeedMon(body.seedMon);
+      // UI 経路では onAnchor が常に synthetic text を送るので lastUserText が非空。seed フォールバックは直叩き（messages 空＋seedMon）用。
+      const query = lastUserText(messages) || (seed ? `${seed.name}に似た相棒をさがす` : "相棒のポケモンをさがす");
       stage({ phase: "fetching", label: "選択肢の語彙を用意中…" });
       let vocab;
       try {
@@ -106,12 +110,12 @@ export async function POST(req: Request) {
         return;
       }
 
-      stage({ phase: "composing", label: "フォームを構成中…" });
+      stage({ phase: "composing", label: seed ? `${seed.name} を起点にフォームを再構成中…` : "フォームを構成中…" });
       const result = streamText({
         model,
         abortSignal: req.signal,
         system: COMPOSE_SYSTEM,
-        prompt: buildFormPrompt(query, vocab.types, vocab.generations),
+        prompt: buildFormPrompt(query, vocab.types, vocab.generations, seed),
       });
       writer.merge(pipeJsonRender(result.toUIMessageStream()));
     },
