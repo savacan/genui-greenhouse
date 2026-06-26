@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import type { ActionContext } from "../lib/finder/types";
 import { pokeTypes } from "../lib/finder/actions/pokeTypes";
 import { findMons } from "../lib/finder/actions/findMons";
+import { fetchJson, mapLimit } from "../lib/finder/fetchJson";
 
 function loadEnv(): Record<string, string> {
   try {
@@ -91,5 +92,29 @@ for (const c of cases) {
     console.log("  HINT:", clip(findMons.describe(state), 900), "\n");
   } catch (e) {
     console.log(`===== ${c.label} FAILED =====\n`, String(e), "\n");
+  }
+}
+
+// ⑫ ランキング正しさ assertion（件数でなく“答えが正しいか”を検証する＝§14b の教訓）。
+// 真の全件ランク（cap なしで fire 全部の total を出す）と findMons の上位を突き合わせ、取りこぼしを検出する。
+{
+  const STAT = ["hp", "attack", "defense", "special-attack", "special-defense", "speed"];
+  try {
+    const fireRaw = await fetchJson<{ pokemon: { pokemon: { name: string } }[] }>(`${pokeBase}/type/fire`, ctx().signal);
+    const names = fireRaw.pokemon.map((e) => e.pokemon.name);
+    const totals = await mapLimit(names, 16, async (n) => {
+      const m = await fetchJson<{ stats: { base_stat: number; stat: { name: string } }[] }>(`${pokeBase}/pokemon/${n}`, ctx().signal);
+      return { n, t: m.stats.filter((s) => STAT.includes(s.stat.name)).reduce((a, s) => a + s.base_stat, 0) };
+    });
+    totals.sort((a, b) => b.t - a.t);
+    const trueTop5 = totals.slice(0, 5).map((x) => x.n);
+    const state = await findMons.compute(await findMons.fetch({ types: ["fire"], sortBy: "total" }, ctx()), { types: ["fire"], sortBy: "total" });
+    const shown = new Set(state.mons.map((m) => m.name));
+    const missed = trueTop5.filter((n) => !shown.has(n));
+    console.log(`===== ⑫ ランキング正しさ（fire 全${names.length}件の真のトップ5を findMons が取りこぼさないか）=====`);
+    console.log(`  真のトップ5: ${trueTop5.join(", ")}`);
+    console.log(`  取りこぼし : ${missed.length ? missed.join(", ") : "なし"}  → ${missed.length ? "FAIL（cap がランキングを壊している）" : "PASS"}`);
+  } catch (e) {
+    console.log("===== ⑫ ランキング正しさ FAILED =====\n", String(e), "\n");
   }
 }

@@ -22,7 +22,7 @@
 |---|---|---|---|---|
 | 01 | [space-cockpit](experiments/01-space-cockpit/) | 探索ダッシュボード × 宇宙 | 単発オーケストレーション（入力→アクション選択→サーバ取得・計算→spec→描画）を縦スライスで通す。待ちのシネマ化・Verdict-Tempo 等の使い心地。 | PR #1 マージ済 |
 | 02 | [aftershock](experiments/02-aftershock/) | エージェント結果可視化 × 地球モニタ | 真の agentic ループ × データファイアウォールの**境界地図**（[docs §8–§12](docs/aftershock.md)）。貫く軸＝**「スカラーは通す・生配列は通さない」**、動かすのは常に「線の幅 ↔ 射程／コスト／レイテンシ」。 | PR #2 |
-| 03 | [pokefinder](experiments/03-pokefinder/) | **入力UI生成（役割反転）** × ポケモン | GenUI が**双方向の入力フォーム**を組む（出力描画 → 入力/state）。[docs §8–§14b](docs/pokefinder.md)。LLM の `$bindState` 組成は高品質（fit/intent 4.45/5・契約遵守は完璧）、境界は **client の state/handler ライフサイクル**（Compose-Live × handler 凍結）・**データ形**（フォーム重複）・**サーバが表現できない意図**（OR/範囲/情緒語を黙って近似＝サイレント縮約 → 中立＋明示で“透明な劣化”へ）。controlled store で remount-flash を解消。§14＝**指差しで組み直す**（出力カード → LLM が「似た相棒」フォームを再 compose）。§14b＝**線を太くして忠実化**（findMons に type OR・世代範囲を足し OR→AND サイレント縮約を源から解消）— だが honesty gap は OR truncation に“移動”し、忠実化は入口だけでなく**出口（結果提示の誠実さ）**まで要る＝線の幅↔射程の再帰。発見→修正→再測の閉ループ＋多サンプル評定（ワークフロー）。 | PR #3 |
+| 03 | [pokefinder](experiments/03-pokefinder/) | **入力UI生成（役割反転）** × ポケモン | GenUI が**双方向の入力フォーム**を組む（出力描画 → 入力/state）。[docs §8–§14b](docs/pokefinder.md)。LLM の `$bindState` 組成は高品質（fit/intent 4.45/5・契約遵守は完璧）、境界は **client の state/handler ライフサイクル**（Compose-Live × handler 凍結）・**データ形**（フォーム重複）・**サーバが表現できない意図**（OR/範囲/情緒語を黙って近似＝サイレント縮約 → 中立＋明示で“透明な劣化”へ）。controlled store で remount-flash を解消。§14＝**指差しで組み直す**（出力カード → LLM が「似た相棒」フォームを再 compose）。§14b＝**線を太くして忠実化**（findMons に type OR・世代範囲を足し OR→AND サイレント縮約を源から解消）。**ただし途中で実バグ**：候補をアルファベット順に60件で切ってからランクしていて「最強の◯◯」が誤答（reshiram/rayquaza が落ちる）→ 全候補をランクする修正（コストはレイテンシ＝線の幅↔射程の正直な支払い）。教訓＝**「開示」は「正解」の代わりにならない／自動検証は機構でなく結果の正しさまで踏む**（人が触って発覚）。発見→修正→再測の閉ループ＋多サンプル評定（ワークフロー）。 | PR #3 |
 
 ---
 

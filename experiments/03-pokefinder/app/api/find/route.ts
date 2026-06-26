@@ -7,7 +7,8 @@ import type { ActionContext } from "@/lib/finder/types";
  * **値だけ** JSON で返す。クライアントは controlled StateStore の /findMons に書き込み、
  * 同一 spec 内の MonGrid を live 更新する（ボード remount なし＝form 選択も結果も飛ばない）。
  */
-export const maxDuration = 30;
+// 全候補の種族値を取り切る（ランキング正確化）ぶん広めに。OR の大きい和集合でも余裕を持たせる。
+export const maxDuration = 60;
 
 type FindBody = {
   types?: string[];

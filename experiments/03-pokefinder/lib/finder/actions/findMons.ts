@@ -40,8 +40,16 @@ const params = z.object({
 });
 type Params = z.infer<typeof params>;
 
-/** 候補が膨らんでも N+1 を抑える上限（単一の広いタイプ等）。超過分は truncated で明示。 */
-const MAX_DETAIL = 60;
+/**
+ * 候補の種族値を取りに行く上限（安全弁）。**ランキングは全候補を評価してから上位を出す**ので、
+ * これより候補が少ない限り「最強順」は正確（旧 60 は cand をアルファベット順に切ってから種族値を取り、
+ * 上位N＝前綴りの一部になって reshiram 等の真の強者を取りこぼす致命バグだった）。
+ * 現実のクエリ（単一タイプ最大 ~192・3タイプ OR 和集合でも ~450）は全部この中に収まり truncated=false。
+ * これを超える病的ケースだけ truncated で明示（その場合のみ前綴り近似）。射程↔レイテンシは全件 fetch のコストで払う。
+ */
+const MAX_DETAIL = 600;
+/** 種族値 fetch の並列度（全候補を取り切るのでやや上げる）。 */
+const DETAIL_CONCURRENCY = 16;
 
 interface TypeRaw {
   pokemon: Array<{ pokemon: { name: string; url: string } }>;
@@ -167,13 +175,13 @@ export const findMons: Action<Params, FindRaw, FindState> = {
     }
     cand.sort(); // 決定的に
 
-    // 3) 候補が多すぎたら上限で切る（種族値を取りに行く N+1 を抑える・切ったことは明示）。
+    // 3) 全候補の種族値を取りに行く（ランキングを正確にするため・安全弁 MAX_DETAIL でのみ切る）。
     const matchedCount = cand.length;
     const capped = cand.slice(0, MAX_DETAIL);
     const truncated = cand.length > MAX_DETAIL;
 
     // 4) 候補の種族値・スプライト・タイプを並列取得（生 payload を返すだけ。整形は compute）。
-    const monsRaw = await mapLimit(capped, 8, (name) =>
+    const monsRaw = await mapLimit(capped, DETAIL_CONCURRENCY, (name) =>
       fetchJson<PokemonRaw>(`${base}/pokemon/${name}`, ctx.signal),
     );
 
@@ -239,10 +247,7 @@ export const findMons: Action<Params, FindRaw, FindState> = {
     }
     if (s.truncated) {
       notes.push(
-        `候補 ${s.matchedCount} 件のうち上位 ${MAX_DETAIL} 件のみ種族値取得（${s.droppedCount} 件は未評価）。` +
-          (s.criteria.typeMode === "or"
-            ? "OR(和集合)は候補が大きく cap で切れやすい＝全体の種族値ランキングを取りこぼし得る（線を広げた代償。AND/世代で絞ると正確）。"
-            : "2つ目のタイプか世代で絞ると正確。"),
+        `候補が非常に多く（${s.matchedCount} 件）、安全弁の上限 ${MAX_DETAIL} 件のみ種族値を評価しました（${s.droppedCount} 件は未評価＝この場合のみ「最強順」は近似）。タイプや世代で絞ると完全に評価できます。`,
       );
     }
     if (s.filteredOut > 0) notes.push(`種族値しきい値で ${s.filteredOut} 件除外。`);
