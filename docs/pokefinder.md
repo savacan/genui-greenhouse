@@ -230,3 +230,26 @@ fire∩flying/speed≥100 の結果 4 件のうち 3 件が `charizard-mega-y`/`
 > 苗床の地図への結論: **two-way 入力フォーム生成は LLM 側の機構的競合力は高い（契約遵守 4.45/5・パス一貫・proxy 判断は誠実）。品質の天井を抑えるのは「サーバが表現できない意図（OR・範囲・情緒）を黙って近似する最後の一手」**＝ GenUI の入力役割に固有の、出力役割（01/02）には無かった新しい破綻面。
 
 > 検証の落とし穴メモ: ワークフロー初回は `args` で渡した配列が `Array.isArray(args)` を通らず `samples=[]` になり、統合エージェントが**空データで品質地図を捏造**した（per-query の値が実データと“それっぽく”一致したため危うく見逃すところだった）。判定エージェントが0個（journal で確認）= 捏造のサインで検知。重要データは **args 配信に頼らずワークフロースクリプトに const 埋め込み**して再実行＝grounded な結果を得た。
+
+---
+
+## 12. form 永続 live 再検索（§9 remount-flash を正面突破・実機検証済み・2026-06-26）
+
+§7/§9 で残課題だった「results が form を置換する → 再検索のたびにフォームが remount され選択が飛ぶ」を、**controlled StateStore による単一永続ボード**で正面から解いた。
+
+**設計の転換**:
+- これまで（Phase C）: 問い→form ボード / 探す→**別の results ボードに置換**（LLM が結果を再 compose・key=msg.id で remount）。
+- 本変種: LLM が **form ＋ 結果リージョンを1枚の spec に** compose（MonGrid を `{$state:/findMons/mons}`・Kpi を `/findMons/count`・Text を `$template ${/findMons/criteriaLabel}` にバインド）。`createStateStore({})` で作った **1つの store を mount したまま** `JSONUIProvider store=` で controlled モードに渡す。「探す」は **LLM を介さず** `/api/find`（計算のみ JSON を返す新エンドポイント）→ `store.set("/findMons", 値)` で書き戻し → 同一 spec の MonGrid が live 更新。**ボードは remount されない**ので form 選択も結果も飛ばない。
+
+**ソースで確定した要点（controlled store）**: `StateStore = {get, set, update, getSnapshot, subscribe}`（`createStateStore(initial)`・core/react どちらからも import 可）。`JSONUIProvider store=` を渡すと **`initialState` と `onStateChange` は無視される**（d.ts 明記）。よって:
+- **spec.state（LLM の初期選択）は controlled store に自動 seed されない** → form が組み上がった時点で `store.set("/shelf", spec.state.shelf)` を1回だけ手動 seed（メッセージ id ごとに1回・探すでは reseed しない＝選択保持）。
+- 入力部品は `useBoundProp` 経由でこの store に read/write、page は `store.getSnapshot()` で現在 shelf を読む（onStateChange/ref 再構成は不要になった）。
+
+**実機検証（Playwright）**: 「炎か飛行で素早さ高め」→ form＋空の結果欄（ほのお/ひこう checked・該当0）→「探す」→ 該当4・MonGrid に charizard 系4枚が **in-place** 表示 → **世代を gen1 にトグル**→「探す」→ 該当**1**・条件 `fire∩flying ∩ 第1世代`・charizard 1枚に更新、かつ **ほのお/ひこう/gen1/slider100 の選択が全て保持**（flash/reset なし）。§9 の remount-flash は**構造的に消えた**。
+
+**トレードオフ（地図に効く判断）**:
+- 得たもの: 再検索が**サーバ計算のみ**（LLM compose 不要）＝速い・滑らか・選択保持。「トグル→探す→その場で結果更新」の双方向ループの FEEL が完成。
+- 失ったもの: 結果が **LLM 再 compose のボードでなく固定 MonGrid への live データ流し込み**になった（LLM はダッシュボード全体を1回組むが、結果の見た目を結果内容ごとに作り変えることはしない）。Phase C の「LLM が結果ボードを毎回 compose」は §10 ＋ git 履歴に残す。
+- すなわち **「LLM 再 compose の表現力」 ↔ 「状態保持＋低レイテンシの双方向 FEEL」はトレードオフ**。GenUI に入力（state）を持たせると、出力役割（01/02）には無かったこの軸が立ち上がる。controlled store はその「状態保持」側の正攻法。
+
+> §12 の結論: 双方向 live 再検索の気持ちよさは **controlled store でボードを mount したまま data だけ差し替える**ことで素直に出る（remount-flash は uncontrolled の initialState 再 seed が原因で、controlled に切れば消える）。代償は「結果の見た目が compose 時に固定される」こと。どちらを取るかは題材次第＝苗床の新しい設計レバー。
