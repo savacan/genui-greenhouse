@@ -196,9 +196,16 @@ export const findMons: Action<Params, FindRaw, FindState> = {
     const truncated = cand.length > MAX_DETAIL;
 
     // 4) 全候補の詳細を並列取得（is_default/species 含む。ランキングは全件評価してから上位を出す）。
-    let monsRaw = await mapLimit(capped, DETAIL_CONCURRENCY, (name) =>
-      fetchJson<PokemonRaw>(`${base}/pokemon/${name}`, ctx.signal),
-    );
+    //    type/<t> はまれに /pokemon に存在しない幽霊フォーム名（例 meowstic-male-mega）を含む＝
+    //    1件の 404 で検索全体を落とさないよう per-item で握り潰し（後段の is_default/世代フィルタでどのみち落ちる類）。
+    const fetched = await mapLimit(capped, DETAIL_CONCURRENCY, async (name) => {
+      try {
+        return await fetchJson<PokemonRaw>(`${base}/pokemon/${name}`, ctx.signal);
+      } catch {
+        return null;
+      }
+    });
+    let monsRaw = fetched.filter((m): m is PokemonRaw => m !== null);
 
     // 5) 形態フィルタ: 既定は is_default の base 種だけ（メガ/キョダイ/eternamax 等の異形を除外）。includeForms で全形態。
     if (!p.includeForms) monsRaw = monsRaw.filter((m) => m.is_default);
@@ -266,14 +273,21 @@ export const findMons: Action<Params, FindRaw, FindState> = {
   describe(s): StateHint {
     const notes: string[] = [];
     if (s.count === 0) {
-      notes.push("該当0件 — 表でなく空状態の Text を出し、条件をゆるめる誘導を添える。");
+      // 0件の原因を名指しして次アクションを示す（汎用「ゆるめて」で終わらせない）。
+      if (s.filteredOut > 0 && s.filteredOut >= s.matchedCount) {
+        notes.push(`該当0件 — 種族値の下限が高すぎて候補${s.matchedCount}件が全て除外されました。下限スライダーを下げてください。`);
+      } else if (s.matchedCount === 0 && !s.criteria.includeForms) {
+        notes.push("該当0件 — 基本形態には一致なし。別形態（メガ等）を含めると見つかる場合があります（トグルを ON）。");
+      } else {
+        notes.push("該当0件 — 条件をゆるめてみてください（タイプを減らす・世代を広げる・下限を下げる）。");
+      }
     }
     if (s.truncated) {
       notes.push(
         `候補が非常に多く（${s.matchedCount} 件）、安全弁の上限 ${MAX_DETAIL} 件のみ種族値を評価しました（${s.droppedCount} 件は未評価＝この場合のみ「最強順」は近似）。タイプや世代で絞ると完全に評価できます。`,
       );
     }
-    if (s.filteredOut > 0) notes.push(`種族値しきい値で ${s.filteredOut} 件除外。`);
+    if (s.filteredOut > 0 && s.count > 0) notes.push(`種族値しきい値で ${s.filteredOut} 件除外。`);
     const cr = s.criteria;
     const join = cr.typeMode === "or" ? "∪" : "∩";
     const genLabel =

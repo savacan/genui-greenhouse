@@ -59,6 +59,7 @@ export async function POST(req: Request) {
       note: findMons.describe(state).notes?.join(" / ") ?? "",
     });
   } catch (e) {
-    return Response.json({ error: String(e) }, { status: 500 });
+    console.error("/api/find failed:", e); // 内部 URL/スタックはサーバログのみ
+    return Response.json({ error: "検索に失敗しました。条件を変えて再試行してください。" }, { status: 500 });
   }
 }
