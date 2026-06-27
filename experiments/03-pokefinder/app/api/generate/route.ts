@@ -1,0 +1,78 @@
+import {
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  streamText,
+  type UIMessage,
+} from "ai";
+import { pipeJsonRender } from "@json-render/core";
+import { getModel } from "@/lib/finder/model";
+import { catalog } from "@/lib/render/catalog";
+import { pokeTypes } from "@/lib/finder/actions/pokeTypes";
+import { buildFormPrompt, parseSeedMon } from "@/lib/finder/compose";
+import type { ActionContext, Stage } from "@/lib/finder/types";
+
+/**
+ * exp03 = 単発 compose（01 写経・agentic loop なし）。フォーム生成のみ:
+ *   問い（or 結果カードの指差し seedMon）→ 語彙(pokeTypes)を添えて LLM が two-way 入力フォーム spec を組む。
+ * 「探す」は §12 で LLM を介さない `/api/find`（計算のみ）に分離済み（旧 intent="find" 経路は撤去）。
+ * spec 経路は hard firewall（LLM は catalog 文法 + パス/件数だけ見る・生 mons は見ない）。
+ */
+export const maxDuration = 60;
+
+const COMPOSE_SYSTEM = catalog.prompt({ mode: "inline" });
+
+function lastUserText(messages: UIMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    return m.parts
+      .filter((p) => p.type === "text")
+      .map((p) => (p as { text?: string }).text ?? "")
+      .join(" ")
+      .trim();
+  }
+  return "";
+}
+
+export async function POST(req: Request) {
+  const body = await req.json();
+  const messages: UIMessage[] = body.messages ?? [];
+  const model = getModel();
+  const ctx: ActionContext = {
+    signal: req.signal,
+    env: { pokeBase: process.env.POKE_API_BASE ?? "https://pokeapi.co/api/v2" },
+  };
+
+  const stream = createUIMessageStream({
+    execute: async ({ writer }) => {
+      const stage = (s: Stage) => writer.write({ type: "data-stage", data: s });
+
+      // ---- form: 問い（or 結果カードの指差し）→ 語彙を添えてフォーム spec を組む ----
+      // §14: body.seedMon があれば「起点ポケモンに似た相棒」フォームを再 compose（出力ジェスチャ → 入力UI 合成）。
+      // 不正な seedMon は parseSeedMon が null に倒す → 通常フォームへフォールバック（無言クラッシュ回避）。
+      const seed = parseSeedMon(body.seedMon);
+      // UI 経路では onAnchor が常に synthetic text を送るので lastUserText が非空。seed フォールバックは直叩き（messages 空＋seedMon）用。
+      const query = lastUserText(messages) || (seed ? `${seed.name}に似た相棒をさがす` : "相棒のポケモンをさがす");
+      stage({ phase: "fetching", label: "選択肢の語彙を用意中…" });
+      let vocab;
+      try {
+        const fetched = await pokeTypes.fetch({}, ctx);
+        vocab = pokeTypes.compute(fetched, {});
+      } catch (e) {
+        stage({ phase: "error", label: `語彙の取得に失敗しました: ${String(e)}` });
+        return;
+      }
+
+      stage({ phase: "composing", label: seed ? `${seed.name} を起点にフォームを再構成中…` : "フォームを構成中…" });
+      const result = streamText({
+        model,
+        abortSignal: req.signal,
+        system: COMPOSE_SYSTEM,
+        prompt: buildFormPrompt(query, vocab.types, vocab.generations, seed),
+      });
+      writer.merge(pipeJsonRender(result.toUIMessageStream()));
+    },
+  });
+
+  return createUIMessageStreamResponse({ stream });
+}
