@@ -269,8 +269,25 @@ compose プロンプトに3点追加して同14クエリを再測:
 
 1. **サーバの線を太くすると fit は単調に上がる＝thesis を“測れた”**: fitAvg **3.9→4.6**・忠実 12/13→17/17。exp02「線の幅↔射程」を**議論でなく数値で実証**（クエリ言語を広げる→fit が上がる）。GenUI の伸びしろが LLM でなくサーバの射程にある、を別ドメインで定量化。
 2. **過去ログの“限界”は鵜呑みにしない**: §11 が「server/上流の限界」と記録した OR・medium は**実は findArt の翻訳ギャップ**＝線は上流が許すより細く引かれていた。probe で実突き合わせて初めて判明（[[verify-output-correctness-not-just-mechanics]]）。
-3. **残る server 側 fit 残課題＝主題の“ランキング”**（#12/#14）: subject の集合（matchedCount）は正しいが、自由語が無いと relevance ソートが人気順に流れ、上位24件が**主題特異度で並ばない**（「睡蓮」検索で Monet の Water Lilies が先頭に来ない）。**集合は正しいが top-N の並びが弱い**＝線の“幅”でなく“ランキング品質”の射程。NEXT＝主題 relevance ブースト／sort。
-4. **compose プロンプト nudge は非単調**（#5↔#10 の type 取りこぼし whack-a-mole）＝LLM 側の run 変動で、nudge を足して潰し切れない（§11 Round 2 の教訓を再確認）。**サーバの線拡張（堅牢な単調改善）とは別物**で、後者の方がロバスト。
+3. **残る server 側 fit 残課題＝主題の“ランキング”**（#12/#14）: subject の集合（matchedCount）は正しいが、自由語が無いと relevance ソートが人気順に流れ、上位24件が**主題特異度で並ばない**（「睡蓮」検索で Monet の Water Lilies が先頭に来ない）。**集合は正しいが top-N の並びが弱い**＝線の“幅”でなく“ランキング品質”の射程。→ **Round 3 で潰した（下記）**。
+4. **compose プロンプト nudge は非単調**（#5↔#10 の type 取りこぼし whack-a-mole）＝LLM 側の run 変動。→ **Round 4 で一般原則化して潰した（下記）**。
 
-**検証**: probe ⑩⑪⑫ live PASS／ブラウザで combineMode フォーム compose→探す→**in-place 更新＋選択保持（§9/§10 再発なし）**＋カードに産地表示／E2E 17クエリ×2 round 多レンズ判定。コミットは PR #4 に乗る。
+**検証（Round 1–2）**: probe ⑩⑪⑫ live PASS／ブラウザで combineMode フォーム compose→探す→**in-place 更新＋選択保持（§9/§10 再発なし）**＋カードに産地表示／E2E 17クエリ×2 round 多レンズ判定。
+
+### Round 3–4＝残課題を潰す（2026-06-30）
+
+**残課題① 主題ランキング → Round 3（server 修正）**: 着手前 recon で**AIC `/artworks/search` は我々の `_score` を完全無視**（filter context へ逃がしても `match` を boost^10 しても**並びは1ミリも動かない**＝独自の人気順）と判明。唯一のランキングレバーが **top-level `q`**。そこで relevance のとき主題＋自由語を `q` に渡す＝「**集合は structured query が固定・並びは q の関連度**」。probe ⑬で `q` 付き総数 == `q` 無し総数（210==210＝**q は集合を絞らずランクだけ**）＋上位6件が water/lily/Nymphaea 系で top=Water Lilies を検証。**round-2 の shelf を再利用し findArt だけ新コードで再実行**（LLM 再 compose なし＝run 変動を排して server 修正の効果だけを測る）＝ **#14 睡蓮 fit 2→4**（top が Paris Street→Monet の Water Lilies）・fitAvg 4.60→**4.67**。残る #14 末尾は「water lilies」トークン vs AIC の「Nymphaea」の**語彙ミスマッチ（data）**。
+
+**残課題② 過剰中立化 → Round 4（プロンプト一般原則化）**: #10 を per-query で叩くのでなく**一般原則**を compose に追加＝「**主観/メタ語と客観語が同居する複合句では、主観語を中立化しても同居する表現可能な客観語（種別/主題/産地/年代/色）は必ず符号化する**（『高価な絵画』→『高価』中立化＋type=painting は必ず ON）」。両修正込みで**同17を fresh compose 再測（Round 4）**:
+
+| metric | §11（太くする前） | §13 R1 | §13 R2 | **R4（残課題 crush 後）** |
+|---|---|---|---|---|
+| fidelityAvg | 4.5 | 4.82 | 4.88 | **4.94** |
+| **fitAvg（検索分）** | **3.9** | 4.63 | 4.60 | **4.94** |
+| 忠実 | 12/13 | 16/17 | 17/17 | **17/17** |
+| locus | llm3/server2/data2 | llm1/server2 | llm1/server2 | **server2 のみ** |
+
+**#10 修正成功**（type=painting を保持しつつ「高価」中立化＝5/4・faithful）。**残る非満点 fit はもはや“破綻”でなく原理的なサーバ表現力の壁**＝(a) #10「高価」は**価格フィールドが AIC に皆無**で絞れない（中立化が正しい）、(b) #13「とにかく古い」は **sortBy 単独では検索を駆動しない設計**（最低1条件が要る）。**llm-locus も data-locus も消えた**（残り 2 件は server の真の射程限界）。
+
+**Round 3–4 の結論**: 残課題は2つとも潰せた＝(1) 主題ランキングは「**AIC は _score を無視・top-level q だけがレバー**」という**上流の癖を recon で掴んでから直す**のが要（憶測の filter/boost は無効だった＝[[verify-output-correctness-not-just-mechanics]]）、(2) 非単調 nudge は per-query でなく**一般原則（中立化の巻き添えで表現可能語を捨てない）に格上げ**すると安定して潰せた。**fit 3.9→4.94・忠実 17/17・破綻 locus は server の原理的限界2件のみ**＝GenUI 入力役割の品質は、サーバの射程と上流の癖を押さえれば**ほぼ天井**まで上げられる。検証＝probe ⑬ live PASS／ブラウザで「睡蓮」→ top3 が Monet の Water Lilies（人気順の Paris Street は #16 へ後退）＋候補件数開示。コミットは PR #4 に乗る。
 

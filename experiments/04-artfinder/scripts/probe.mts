@@ -231,3 +231,24 @@ try {
   console.log("  ⑫ FAILED:", String(e));
 }
 console.log("");
+
+// ⑬ 主題ランキング（§13 残課題の修正）: top-level q で「集合は不変・並びは主題関連度」になるか
+console.log("===== ⑬ 主題ランキング（top-level q で並びを主題順に・集合は不変）=====");
+try {
+  const shelf: Shelf = { type: { painting: true }, subject: "water lilies" };
+  const withQ = buildSearchBody(toFindParams(shelf), 12);
+  const noQ: Record<string, unknown> = { ...withQ };
+  delete noQ.q; // q を外した構造化クエリのみ
+  const cWith = (await direct(withQ)).total;
+  const cNo = (await direct(noQ)).total;
+  console.log(`  (a) q は集合を絞らずランクのみ: q付き総数(${cWith}) == q無し総数(${cNo}) → ${ok(cWith === cNo)}`);
+  const { rows } = await direct(withQ);
+  const onSubj = rows.slice(0, 6).filter((r) => {
+    const s = ((r.subject_titles ?? []).join(" ") + " " + (r.title ?? "")).toLowerCase();
+    return /water|lil|nymph|pond/.test(s);
+  }).length;
+  console.log(`  (b) 主題ランク: 上位6件中 water/lily/Nymphaea/pond 系 ${onSubj} 件・top='${rows[0]?.title ?? "-"}' → ${ok(onSubj >= 4)}（人気順でなく主題順）`);
+} catch (e) {
+  console.log("  ⑬ FAILED:", String(e));
+}
+console.log("");

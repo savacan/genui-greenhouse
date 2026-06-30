@@ -238,8 +238,17 @@ export function buildSearchBody(p: Params, limit: number): Record<string, unknow
     fields: FIELDS,
     limit,
   };
+  // 並べ替え。AIC の /artworks/search は **我々の _score を無視して独自の人気順**を返す
+  // （filter context へ逃がしても match を boost しても並びは不変＝recon で確認）。唯一のランキング
+  // レバーが top-level `q`。そこで relevance のときは主題＋自由語を q に渡し「集合は structured query が
+  // 固定・並びは q の関連度」にする（§13 残課題の主題ランキングを潰す）。q は集合を絞らない＝件数(matchedCount)
+  // は不変・上位N件が人気順でなく主題特異度順に並ぶ（「睡蓮」で Monet の Water Lilies が先頭へ）。
   if (p.sortBy === "newest") body.sort = [{ date_start: "desc" }];
   else if (p.sortBy === "oldest") body.sort = [{ date_start: "asc" }];
+  else {
+    const rankText = [subject, q].filter((s) => s.length > 0).join(" ");
+    if (rankText) body.q = rankText;
+  }
   return body;
 }
 
