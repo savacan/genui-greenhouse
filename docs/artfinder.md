@@ -224,5 +224,53 @@ compose プロンプトに3点追加して同14クエリを再測:
 - **上流が豊かな DSL を持つ構成**（AIC ES）では、load-bearing は自前 findMons でなく**サーバの form→ES 翻訳忠実度＋上流クエリ言語の射程**に移った（H3 実証）。`.keyword` 必須・自由語は multi_match で“絞る”・ファセット内 OR/間 AND は LLM でなく**サーバが背負う**＝H3 の通り。
 - **破綻は一貫して LLM でなくサーバ/データ側**（クエリ言語の表現力＝版画の地域/主題/価格/OR、データ粒度＝版画の部門・date_start=0 の欠損・medium サブファセット不在）。exp02「線の幅↔射程」と完全に同型。
 - **データソースの実在性クセ（§16 級）**: AIC 画像は cross-origin 表示不可（Cloudflare＋CORP）＝第三者アプリで写真を出せない。**実ブラウザ検証で初めて判明**（curl では見えない）＝「機構でなく実出力を見る」の再確認。色チップ視覚化に転化。
-- **NEXT 候補**: findArt の射程拡張（主題タグ subject・地域メタの正規化・クロスファセット OR）／画像の代替表示（色チップ以外）の検討／さらに別の役割（編集・構成）への反転。
+- **NEXT 候補**: ~~findArt の射程拡張（主題タグ subject・地域メタの正規化・クロスファセット OR）~~ → §13 で実施。主題の relevance ランキング改善（fit の残課題）／画像の代替表示（色チップ以外）の検討／さらに別の役割（編集・構成）への反転。
+
+## 13. 線を太くして fit を測る（subject・region・クロスファセット OR をサーバに追加・発見→修正→再測・2026-06-30）
+
+§12 は「破綻は server/data 側＝線を太くすれば fit は上がるはず」で終わったが、**「実際に太くすると、stuck していた fitAvg 3.9 はどこまで上がるか」は未測定**だった。これを測る。着手前に実 AIC を probe したところ、§11 が「サーバ/上流の限界」と記録した破綻のうち **2つは上流の限界でなく findArt の翻訳ギャップ**だった（[[verify-output-correctness-not-just-mechanics]] の逆＝過去ログも疑う）:
+- **クロスファセット OR**: ES は `should + minimum_should_match` で1ボディ表現可能（findArt が `must` に潰していただけ）。実証 `(絵画∧仏) OR 版画 = 48373`（= 528+47845 で disjoint 和に一致）。
+- **medium サブファセット**: `classification_titles.keyword=etching → 12770` 等で到達可能（粗粒度 `artwork_type_title` の下に足せる）。
+
+### 足したもの（サーバの「線」を太く＝§14b 同型・全て probe で実 AIC 突き合わせ済）
+- **主題 subject**（`match subject_titles`）: 「水辺」→water・「抽象」→abstract・「肖像」→portrait。q（作者/作品名）から主題を**分離**（q の fields を title/artist_title に絞り、term_titles を外した＝「q が主題を暗に約束する」嘘を解消）。
+- **産地 region**（`match place_of_origin`）: 国レベルは直 match（France=15257・Japan=12529）、**大陸語はサーバが代表国の OR へ展開**（"Europe"→France/Italy/… ＝§15「正しい粒度への正規化はサーバの責務」）。版画・素描も**産地で地域を絞れる**（地域部門と違い産地は種別を選ばない）→ §4 の「版画×地域は 0 件」を**忠実化**（開示でなく実フィルタに）。
+- **クロスファセット OR `combineMode`**（and 既定 / or）: 「絵画か、青い作品」のような**軸またぎ OR** を内容条件の `should`（いずれか一致）に翻訳。pokefinder §14b の typeMode を cross-facet に持ち上げた形。
+- **候補件数の開示**（§16 の正直さ）: matchedCount>表示件数なら「候補N件のうち上位M件を表示」を note に。
+- compose プロンプトを更新: §4 の「版画は地域で絞れない」開示 → region で**忠実化**、クロスファセット OR の「表現不能」開示 → **combineMode=or で表現可能**へ反転（黙って AND に倒さず or で忠実に）。主観/メタ語（有名・高価）は依然中立化＋明示（価格フィールドは AIC に皆無＝不可能性で確定）。
+- **probe 恒久追加**: ⑩主題（版画×portrait の返り行が subject タグを持つ）⑪産地（国 match＋大陸展開が literal を遥かに超える）⑫**クロスファセット OR は包除原理が厳密成立**（`OR == A+B−AND` で“近似でない本物”を検証）。全 PASS。
+
+### Round 1（線を太くした直後・同17クエリ＝§11 の13＋新射程4）
+
+| metric | §11 Round 2（太くする前） | **§13 Round 1（太くした後）** |
+|---|---|---|
+| fidelityAvg | 4.5 | **4.82** |
+| **fitAvg（検索実行分）** | **3.9** | **4.63** |
+| 忠実 | 12/13 | **16/17** |
+| 破綻 locus | llm 3 / server 2 / data 2 | **llm 1 / server 2** |
+
+§11 の大破綻が忠実＋高 fit に転じた: **#4 19世紀ヨーロッパの版画**（region+print+year で 5/5・欧州各国の Print）／**#12 水辺**（subject=water で実フィルタ）／**#16 絵画か青い作品**（combineMode=or 5/5・候補11696 の和集合）／**#17 アフリカの染織**（region 大陸展開）。残る非満点は #5（type 取りこぼし・llm）と #12/#14（subject の relevance ランキング・server）。
+
+### Round 2（発見→修正→再測の閉ループ・#5 を直す）
+
+#5「赤い抽象画」が `subject=abstract`＋赤は入れたが **`type=painting` を取りこぼし**（彫刻が混入・唯一の faithful=false）。compose に「**『〜画』複合語（抽象画/風景画/静物画/肖像画）は subject に主題を入れ、かつ type=painting も必ず ON**」を追加して同17再測:
+
+| metric | §13 Round 1 | **§13 Round 2** | 変化 |
+|---|---|---|---|
+| fidelityAvg | 4.82 | **4.88** | ↑ |
+| fitAvg（検索分） | 4.63 | **4.60** | ほぼ横ばい |
+| 忠実 | 16/17 | **17/17** | ↑ |
+| locus | llm 1 / server 2 | llm 1 / server 2 | — |
+
+- **#5 修正成功**: type=painting＋subject=abstract→候補135→51（絵画のみ）・fid3→5/fit3→5/faithful 化。nudge が般化し **#12 も `subject="water landscape"`**（「風景画」→landscape）に。
+- **だが #10「高価な絵画」が新規回帰**（5/5→3/3・type 取りこぼし）: 「高価」中立化の際に表現可能な「絵画」type まで落として skip。**§11 Round 2 と同じ #10 の失敗を live で再現**＝プロンプト nudge は**非単調**（#5 を直すと #10 が戻る whack-a-mole）。#5 修正が #10 を**引き起こしたのではない**（「絵画」単体で「〜画」複合語トリガに非該当・独立した run 変動）。
+
+### §13 の結論（正直に）
+
+1. **サーバの線を太くすると fit は単調に上がる＝thesis を“測れた”**: fitAvg **3.9→4.6**・忠実 12/13→17/17。exp02「線の幅↔射程」を**議論でなく数値で実証**（クエリ言語を広げる→fit が上がる）。GenUI の伸びしろが LLM でなくサーバの射程にある、を別ドメインで定量化。
+2. **過去ログの“限界”は鵜呑みにしない**: §11 が「server/上流の限界」と記録した OR・medium は**実は findArt の翻訳ギャップ**＝線は上流が許すより細く引かれていた。probe で実突き合わせて初めて判明（[[verify-output-correctness-not-just-mechanics]]）。
+3. **残る server 側 fit 残課題＝主題の“ランキング”**（#12/#14）: subject の集合（matchedCount）は正しいが、自由語が無いと relevance ソートが人気順に流れ、上位24件が**主題特異度で並ばない**（「睡蓮」検索で Monet の Water Lilies が先頭に来ない）。**集合は正しいが top-N の並びが弱い**＝線の“幅”でなく“ランキング品質”の射程。NEXT＝主題 relevance ブースト／sort。
+4. **compose プロンプト nudge は非単調**（#5↔#10 の type 取りこぼし whack-a-mole）＝LLM 側の run 変動で、nudge を足して潰し切れない（§11 Round 2 の教訓を再確認）。**サーバの線拡張（堅牢な単調改善）とは別物**で、後者の方がロバスト。
+
+**検証**: probe ⑩⑪⑫ live PASS／ブラウザで combineMode フォーム compose→探す→**in-place 更新＋選択保持（§9/§10 再発なし）**＋カードに産地表示／E2E 17クエリ×2 round 多レンズ判定。コミットは PR #4 に乗る。
 

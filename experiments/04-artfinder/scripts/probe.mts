@@ -178,3 +178,56 @@ try {
   console.log("  ⑨ FAILED:", String(e));
 }
 console.log("");
+
+// ⑩ 主題 subject（match subject_titles）: 返り行が主題タグを実際に持つ（§16 出力 correctness）
+console.log("===== ⑩ 主題 subject（subject_titles を実際に絞る）=====");
+try {
+  const body = buildSearchBody(toFindParams({ type: { print: true }, subject: "portrait" }), 30);
+  const { rows } = await direct(body);
+  const hit = rows.filter(
+    (r) => Array.isArray(r.subject_titles) && r.subject_titles.some((t: string) => /portrait/i.test(t)),
+  ).length;
+  console.log(`  版画×主題portrait: 返り${rows.length}件中 subject に portrait系 ${hit} 件 → ${ok(rows.length > 0 && hit >= rows.length * 0.7)}`);
+  // q（作者/作品名）と subject（画題）の分離: 同語でも別フィールドを叩く＝件数が違ってよい
+  const sub = (await find({ type: { painting: true }, subject: "landscape" })).state.matchedCount;
+  const qq = (await find({ type: { painting: true }, q: "landscape" })).state.matchedCount;
+  console.log(`  分離: 絵画×subject=landscape(${sub}) は 絵画×q=landscape(${qq}) と別経路で機能 → ${ok(sub > 0)}`);
+} catch (e) {
+  console.log("  ⑩ FAILED:", String(e));
+}
+console.log("");
+
+// ⑪ 産地 region（place_of_origin・大陸展開）: 国レベルは literal 一致／大陸はサーバ展開で literal を遥かに超える
+console.log("===== ⑪ 産地 region（国 match ＋ 大陸はサーバ展開）=====");
+try {
+  const { rows } = await direct(buildSearchBody(toFindParams({ region: "Japan" }), 30));
+  const jpHit = rows.filter((r) => typeof r.place_of_origin === "string" && /japan/i.test(r.place_of_origin)).length;
+  console.log(`  産地Japan: 返り${rows.length}件中 place=Japan ${jpHit} 件 → ${ok(rows.length > 0 && jpHit >= rows.length * 0.8)}`);
+  const euExp = (await find({ type: { print: true }, region: "Europe" })).state.matchedCount;
+  const euLit = (
+    await direct({
+      query: { bool: { must: [{ term: { "artwork_type_title.keyword": "Print" } }, { match: { place_of_origin: "Europe" } }, { exists: { field: "image_id" } }] } },
+      limit: 0,
+    })
+  ).total;
+  console.log(`  大陸展開 版画×Europe: 展開${euExp} >> literal "Europe"=${euLit} → ${ok(euExp > euLit * 5)}（§4 版画×地域を産地で忠実化）`);
+} catch (e) {
+  console.log("  ⑪ FAILED:", String(e));
+}
+console.log("");
+
+// ⑫ クロスファセット OR（combineMode=or）: 包除原理が厳密に成立＝OR は“近似でなく本物”（§16 出力 correctness の核）
+console.log("===== ⑫ クロスファセット OR（包除原理で本物だと検証）=====");
+try {
+  const A = (await find({ type: { painting: true } })).state.matchedCount;
+  const B = (await find({ hue: 215 })).state.matchedCount;
+  const AND = (await find({ type: { painting: true }, hue: 215 })).state.matchedCount;
+  const OR = (await find({ type: { painting: true }, hue: 215, combineMode: "or" })).state.matchedCount;
+  console.log(`  絵画(${A}) ∪ 青(${B}): OR=${OR} == A+B-AND(${A + B - AND}) → ${ok(OR === A + B - AND)}（OR は本物・近似でない）`);
+  // 内容条件1つだけのとき combineMode=or は AND と同義（should に畳まれない安全弁）
+  const single = (await find({ type: { painting: true }, combineMode: "or" })).state.matchedCount;
+  console.log(`  単一条件で or 指定: 絵画のみ(${single}) == 絵画AND(${A}) → ${ok(single === A)}（OR は内容2件以上のときだけ）`);
+} catch (e) {
+  console.log("  ⑫ FAILED:", String(e));
+}
+console.log("");

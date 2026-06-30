@@ -22,6 +22,8 @@ export interface ArtGridRow {
   medium: string;
   type: string;
   department: string;
+  origin?: string;
+  subjects?: string[];
   onView: boolean;
   image: string | null;
   swatch: string | null;
@@ -60,6 +62,7 @@ export function ArtGrid({ artworks }: { artworks: ArtGridRow[] }) {
             <div className="af-card__meta">
               {a.dateText ? <span>{a.dateText}</span> : null}
               {a.type ? <span className="af-typebadge">{a.type}</span> : null}
+              {a.origin ? <span className="af-origin">{a.origin}</span> : null}
             </div>
             {a.medium ? <div className="af-card__medium">{a.medium}</div> : null}
           </div>

@@ -20,9 +20,9 @@ import { toFindParams, hasAnyFilter, type Shelf } from "@/lib/finder/shelf";
 
 const EXAMPLES = [
   "青っぽい近代の油彩",
-  "モネの絵",
-  "アジアの彫刻か陶磁",
-  "19世紀ヨーロッパの版画",
+  "水辺を描いた風景画",
+  "ヨーロッパの版画",
+  "絵画か、青い作品",
 ];
 
 type AnyPart = { type: string; data?: unknown };

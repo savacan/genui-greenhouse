@@ -78,8 +78,10 @@ export const catalog = defineCatalog(schema, {
         value: z.string().nullable(),
       }),
       description:
-        "自由テキスト入力（作者名・主題キーワード）。value は two-way: " +
-        '"value": { "$bindState": "/shelf/q" }。作者名（「モネ」→ローマ字 Monet 推奨）や主題語を入れる欄。問いに固有名詞があれば初期 state に入れる。',
+        "自由テキスト入力（英語）。value は two-way。用途で結ぶパスを変える（複数置いてよい）: " +
+        '作者名・作品名 → "value": { "$bindState": "/shelf/q" }（「モネ」→Monet）／' +
+        '主題・画題＝何が描かれているか → "/shelf/subject"（「水辺」→water・「抽象」→abstract・「肖像」→portrait）／' +
+        '産地・地域 → "/shelf/region"（大陸 Europe/Asia… か国名 France/Japan…）。問いに該当語があれば初期 state に英語で入れる。',
     },
     RangeSelect: {
       props: z.object({
@@ -110,8 +112,9 @@ export const catalog = defineCatalog(schema, {
         value: z.union([z.number(), z.string()]).nullable(),
       }),
       description:
-        "単一選択ドロップダウン。value は two-way。用途は並べ替え: " +
-        '"value": { "$bindState": "/shelf/sortBy" }、options=[{value:"relevance",label:"関連度"},{value:"newest",label:"新しい順"},{value:"oldest",label:"古い順"}]。',
+        "単一選択ドロップダウン。value は two-way。用途は2つ: " +
+        '(1) 並べ替え → "value": { "$bindState": "/shelf/sortBy" }、options=[{value:"relevance",label:"関連度"},{value:"newest",label:"新しい順"},{value:"oldest",label:"古い順"}]。' +
+        '(2) 組み合わせ方（軸またぎの「または」のときだけ）→ "/shelf/combineMode"、options=[{value:"and",label:"すべての条件"},{value:"or",label:"いずれかの条件"}]。',
     },
     ActionButton: {
       props: z.object({
@@ -135,6 +138,8 @@ export const catalog = defineCatalog(schema, {
             medium: z.string(),
             type: z.string(),
             department: z.string(),
+            origin: z.string().default(""),
+            subjects: z.array(z.string()).default([]),
             onView: z.boolean(),
             image: z.string().nullable(),
             swatch: z.string().nullable(),

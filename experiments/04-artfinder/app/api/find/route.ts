@@ -24,11 +24,14 @@ export async function POST(req: Request) {
     onView: body.onView === true,
     publicDomain: body.publicDomain === true,
     q: typeof body.q === "string" && body.q.trim() ? body.q.trim() : null,
+    subject: typeof body.subject === "string" && body.subject.trim() ? body.subject.trim() : null,
+    region: typeof body.region === "string" && body.region.trim() ? body.region.trim() : null,
+    combineMode: body.combineMode === "or" ? "or" : "and",
     sortBy: body.sortBy === "newest" || body.sortBy === "oldest" ? body.sortBy : "relevance",
   };
   if (!hasAnyFilter(probe)) {
     return Response.json(
-      { error: "種別・部門・年代・色・検索語のいずれかを1つ以上指定してください。" },
+      { error: "種別・部門・年代・色・主題・産地・検索語のいずれかを1つ以上指定してください。" },
       { status: 400 },
     );
   }
@@ -44,6 +47,9 @@ export async function POST(req: Request) {
       onView: probe.onView,
       publicDomain: probe.publicDomain,
       q: probe.q,
+      subject: probe.subject,
+      region: probe.region,
+      combineMode: probe.combineMode,
       sortBy: probe.sortBy,
     });
   } catch (e) {

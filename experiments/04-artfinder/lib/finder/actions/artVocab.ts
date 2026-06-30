@@ -63,6 +63,24 @@ export const SORTS = [
   { value: "oldest", ja: "古い順" },
 ] as const;
 
+/**
+ * 産地（place_of_origin）は AIC では正規化された entity でなく**国/都市の自由文字列**（recon 済・place_ids 無し）。
+ * 「ヨーロッパ」のような大陸語で直接 match しても literal タグ（449件）しか拾えないので、
+ * **サーバが大陸語を代表国の OR へ展開する**＝§15「正しい粒度への正規化責務はサーバに残る」。
+ * curate-best-effort（AIC によく現れる産地を厚め に。網羅でなく代表）。slug は英語小文字（LLM が region に英語で入れる）。
+ */
+export const REGION_EXPANSION: Record<string, string[]> = {
+  europe: ["France", "Italy", "Netherlands", "Spain", "Germany", "England", "Belgium", "Austria", "Switzerland", "Greece"],
+  asia: ["Japan", "China", "Korea", "India", "Iran", "Turkey", "Thailand", "Vietnam"],
+  "east asia": ["Japan", "China", "Korea"],
+  africa: ["Egypt", "Nigeria", "Mali", "Ghana", "Morocco", "Congo", "Africa"],
+  americas: ["United States", "Mexico", "Peru", "Brazil", "Canada", "Guatemala"],
+  america: ["United States", "Mexico", "Peru", "Brazil", "Canada", "Guatemala"],
+  "north america": ["United States", "Mexico", "Canada"],
+  "south america": ["Peru", "Brazil", "Colombia", "Argentina", "Bolivia"],
+  "latin america": ["Mexico", "Peru", "Brazil", "Guatemala", "Colombia"],
+};
+
 export type TypeVocab = { slug: string; ja: string; title: string };
 export type DeptVocab = { slug: string; ja: string; title: string };
 export type HueVocab = { slug: string; ja: string; h: number; swatch: string };

@@ -15,11 +15,15 @@ export type Shelf = {
   hue?: number | string | null; // 色相 0-360 の中心（null=色指定なし）
   onView?: boolean; // 展示中のみ
   publicDomain?: boolean; // パブリックドメインのみ
-  q?: string | null; // 自由テキスト（作者名・キーワード）
+  q?: string | null; // 自由テキスト（作者名・作品名）
+  subject?: string | null; // 主題・画題（subject_titles を match＝何が描かれているか・英語）
+  region?: string | null; // 産地・地域（place_of_origin・英語・大陸はサーバが代表国へ展開）
+  combineMode?: string; // and（既定・ファセット間 AND）| or（軸またぎのクロスファセット OR）
   sortBy?: string; // relevance | newest | oldest
 };
 
 export type ArtSortBy = "relevance" | "newest" | "oldest";
+export type ArtCombineMode = "and" | "or";
 
 export type ArtFindParams = {
   types: string[]; // slug
@@ -30,6 +34,9 @@ export type ArtFindParams = {
   onView: boolean;
   publicDomain: boolean;
   q: string | null;
+  subject: string | null;
+  region: string | null;
+  combineMode: ArtCombineMode;
   sortBy: ArtSortBy;
 };
 
@@ -52,6 +59,8 @@ const SORTS: ReadonlySet<string> = new Set(["relevance", "newest", "oldest"]);
 /** store の現在 shelf → findArt 引数（false/空は落とす）。 */
 export function toFindParams(shelf: Shelf | undefined): ArtFindParams {
   const q = typeof shelf?.q === "string" ? shelf.q.trim() : "";
+  const subject = typeof shelf?.subject === "string" ? shelf.subject.trim() : "";
+  const region = typeof shelf?.region === "string" ? shelf.region.trim() : "";
   return {
     types: trueKeys(shelf?.type).slice(0, 8),
     departments: trueKeys(shelf?.department).slice(0, 12),
@@ -61,13 +70,17 @@ export function toFindParams(shelf: Shelf | undefined): ArtFindParams {
     onView: shelf?.onView === true,
     publicDomain: shelf?.publicDomain === true,
     q: q.length ? q : null,
+    subject: subject.length ? subject : null,
+    region: region.length ? region : null,
+    combineMode: shelf?.combineMode === "or" ? "or" : "and",
     sortBy: SORTS.has(shelf?.sortBy ?? "") ? (shelf!.sortBy as ArtSortBy) : "relevance",
   };
 }
 
 /**
- * 検索に意味のある条件が1つでもあるか（種別/部門/年代/色相/自由語）。
+ * 検索に意味のある条件が1つでもあるか（種別/部門/年代/色相/自由語/主題/産地）。
  * onView/publicDomain は“絞り込みの修飾”であって単独の検索条件にしない（それだけで全件は引かせない）。
+ * combineMode も単独条件にしない（OR の対象になる内容条件が無ければ無意味）。
  * pokefinder の「types 必須」と同型＝「条件ゼロでも探せます」の嘘を防ぐ（§16 false-disclosure）。
  */
 export function hasAnyFilter(p: ArtFindParams): boolean {
@@ -77,6 +90,8 @@ export function hasAnyFilter(p: ArtFindParams): boolean {
     p.yearFrom != null ||
     p.yearTo != null ||
     p.hue != null ||
-    (p.q != null && p.q.length > 0)
+    (p.q != null && p.q.length > 0) ||
+    (p.subject != null && p.subject.length > 0) ||
+    (p.region != null && p.region.length > 0)
   );
 }
